@@ -5,6 +5,3 @@ pillow
 requests
 PyMuPDF
 pydantic
-pydantic-settings
-httpx
-slowapi
