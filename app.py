@@ -37,7 +37,7 @@ app.add_middleware(
 # templates + static
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+#app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 # ---------------- مدل‌ها ----------------
 class ChatRequest(BaseModel):
