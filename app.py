@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# ---------------- تنظیمات ----------------
+# ---------------- تنظیمات ---------------
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 MODEL_DEFAULT = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
