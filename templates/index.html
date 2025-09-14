@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="fa" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jarvis-Gemini</title>
+  <link rel="icon" type="image/x-icon" href="/static/five.ico" />
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #0f1724;
+      --muted: #94a3b8;
+      --user: #60a5fa;
+      --assistant: #34d399;
+      --accent: #2563eb;
+      --text: #e6eef8;
+    }
+    html,body { height:100%; margin:0; font-family: "Helvetica Neue", Arial, sans-serif; background:var(--bg); color:var(--text); }
+    .app { min-height:100vh; display:flex; flex-direction:column; }
+    header { padding:16px; font-weight:700; border-bottom:1px solid #24303a; background:linear-gradient(90deg, rgba(255,255,255,0.02), transparent); }
+    main { flex:1; padding:16px; overflow:auto; }
+    .msg { margin:8px 0; max-width:80%; padding:10px 12px; border-radius:8px; }
+    .msg.user { background: rgba(96,165,250,0.08); color:var(--user); margin-left:auto; text-align:left; }
+    .msg.assistant { background: rgba(52,211,153,0.06); color:var(--assistant); margin-right:auto; text-align:left; }
+    footer { padding:12px; border-top:1px solid #24303a; display:flex; gap:8px; align-items:center; background:var(--panel); }
+    input[type="text"] { flex:1; padding:10px; border-radius:8px; border:1px solid #20313a; background:#071223; color:var(--text); outline:none; }
+    button { padding:10px 14px; border-radius:8px; border:none; background:var(--accent); color:white; cursor:pointer; }
+    .meta { font-size:12px; color:var(--muted); margin-top:6px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>Jarvis-Gemini</header>
+
+    <main id="chat">
+      <!-- پیام‌ها اینجا اضافه میشن -->
+    </main>
+
+    <footer>
+      <input id="input" type="text" placeholder="پیام خود را بنویسید..." autocomplete="off" />
+      <button id="send">ارسال</button>
+    </footer>
+
+    <div class="meta" style="padding:8px 16px;">
+      مدل پیش‌فرض: <strong id="model-name">{{ default_model }}</strong>
+    </div>
+  </div>
+
+  <script>
+    // client-side chat بدون React
+    (function(){
+      const chatEl = document.getElementById("chat");
+      const inputEl = document.getElementById("input");
+      const sendBtn = document.getElementById("send");
+      let messages = [];
+
+      function render() {
+        chatEl.innerHTML = "";
+        messages.forEach((m,i) => {
+          const d = document.createElement("div");
+          d.className = "msg " + (m.role === "user" ? "user" : "assistant");
+          d.textContent = (m.role === "user" ? "شما: " : "سیستم: ") + m.content;
+          chatEl.appendChild(d);
+        });
+        // اسکرول به پایین
+        chatEl.scrollTop = chatEl.scrollHeight;
+      }
+
+      async function sendMessage() {
+        const text = inputEl.value.trim();
+        if (!text) return;
+        // اضافه کردن پیام کاربر
+        messages.push({ role: "user", content: text });
+        render();
+        inputEl.value = "";
+        inputEl.disabled = true;
+        sendBtn.disabled = true;
+
+        try {
+          const resp = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ messages: messages })
+          });
+
+          if (!resp.ok) {
+            const txt = await resp.text();
+            throw new Error("خطا از سرور: " + resp.status + " " + txt);
+          }
+
+          const data = await resp.json();
+          // استخراج پاسخ (همانند کد قبلی)
+          const reply = (data?.candidates?.[0]?.content?.parts?.[0]?.text) || "خطا در دریافت پاسخ";
+          messages.push({ role: "assistant", content: reply });
+          render();
+        } catch (err) {
+          console.error(err);
+          messages.push({ role: "assistant", content: "خطا: " + (err.message || err) });
+          render();
+        } finally {
+          inputEl.disabled = false;
+          sendBtn.disabled = false;
+          inputEl.focus();
+        }
+      }
+
+      sendBtn.addEventListener("click", sendMessage);
+      inputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") sendMessage();
+      });
+
+      // initial render (empty)
+      render();
+    })();
+  </script>
+</body>
+</html>
