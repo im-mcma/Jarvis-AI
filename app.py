@@ -24,7 +24,7 @@ MODELS = {
 }
 
 # ---------------- اپ اصلی ----------------
-app = FastAPI(title="Jarvis-Gemini")
+app = FastAPI(title="Jarvis-Ai")
 
 app.add_middleware(
     CORSMiddleware,
