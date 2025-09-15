@@ -1,7 +1,9 @@
 fastapi
-uvicorn
 gunicorn
 httpx[http2]
 python-dotenv
 jinja2
 google-cloud-firestore
+uvicorn[standard]
+websockets
+wsproto
