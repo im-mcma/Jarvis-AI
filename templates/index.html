@@ -1,372 +1,196 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jarvis-Ai</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.0.3/Vazirmatn-font-face.css">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    
-    <style>
-        :root {
-            --bg-primary: #111827; /* bg-gray-900 */
-            --bg-secondary: #1F2937; /* bg-gray-800 */
-            --bg-tertiary: #374151; /* bg-gray-700 */
-            --border-color: #4B5563; /* bg-gray-600 */
-            --text-primary: #F3F4F6; /* text-gray-100 */
-            --text-secondary: #9CA3AF; /* text-gray-400 */
-            --accent-primary: #4f46e5; /* indigo-600 */
-            --accent-hover: #4338ca; /* indigo-700 */
-        }
-        body {
-            font-family: 'Vazirmatn', sans-serif;
-            background-color: var(--bg-primary);
-            color: var(--text-primary);
-        }
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: var(--bg-secondary); }
-        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
-        .sidebar-item.active { background-color: var(--accent-primary) !important; color: white; }
-        .ai-response-content pre { position: relative; }
-        .copy-btn { position: absolute; top: 0.5rem; left: 0.5rem; background-color: var(--bg-tertiary); color: white; border: none; padding: 0.5rem; border-radius: 0.25rem; cursor: pointer; opacity: 0; transition: opacity 0.2s; }
-        .ai-response-content pre:hover .copy-btn { opacity: 1; }
-        .copy-btn.copied { background-color: #059669; }
-        .cursor { display: inline-block; width: 10px; height: 1.2rem; background-color: var(--text-primary); animation: blink 1s infinite; vertical-align: middle; }
-        @keyframes blink { 50% { opacity: 0; } }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jarvis AI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: 'Vazirmatn', sans-serif;
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      color: #e2e8f0;
+    }
+    .sidebar-item.active {
+      background: linear-gradient(90deg, #4f46e5, #4338ca);
+      color: white;
+      font-weight: bold;
+    }
+    .ai-response-content {
+      animation: fadeIn 0.4s ease-in-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    textarea, input, select {
+      transition: all 0.2s ease-in-out;
+    }
+    textarea:focus, input:focus, select:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 2px #6366f1;
+    }
+  </style>
 </head>
-
-<body class="flex h-screen antialiased">
-    <aside class="w-72 bg-gray-900 flex flex-col p-2 border-l border-gray-700">
-        <button id="new-chat-btn" class="w-full text-right p-3 mb-2 rounded-md hover:bg-gray-700 transition-colors flex items-center gap-2">
-            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-            گفتگوی جدید
-        </button>
-        <div id="conversation-list" class="flex-grow overflow-y-auto"></div>
-        <div class="mt-auto pt-2 border-t border-gray-700">
-             <h3 class="text-lg font-semibold p-2">دفترچه یادداشت</h3>
-             <textarea id="notebook" class="w-full h-32 p-2 bg-gray-800 text-gray-200 border border-gray-600 rounded-md resize-none" placeholder="نکات خود را اینجا بنویسید..."></textarea>
-        </div>
-    </aside>
-
-    <div class="flex flex-col flex-1 h-full">
-        <header class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/80 backdrop-blur-sm sticky top-0 z-10">
-            <h1 id="chat-title" class="text-xl font-bold text-white">Jarvis-Ai</h1>
-            <select id="model-select" class="p-2 bg-gray-800 text-white border border-gray-600 rounded-md text-sm cursor-pointer">
-                {% for key, model in models.items() %}
-                <option value="{{ key }}">{{ model.name }}</option>
-                {% endfor %}
-            </select>
-        </header>
-
-        <main id="chat-history" class="flex-grow p-4 overflow-y-auto space-y-6"></main>
-
-        <footer class="p-4 border-t border-gray-700 bg-gray-900">
-            <div id="prompt-starters" class="flex gap-2 mb-2 justify-center"></div>
-            <div id="preview-container" class="mb-2"></div>
-            <form id="chat-form" class="flex gap-3 items-end">
-                <button type="button" id="upload-btn" title="آپلود تصویر" class="p-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600">
-                     <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l-1-1a2 2 0 010-2.828l1-1"></path><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
-                </button>
-                <input type="file" id="file-input" accept="image/*" class="hidden">
-                <textarea id="chat-input" placeholder="یک پیام بنویسید..." rows="1" class="flex-grow p-3 rounded-lg border border-gray-600 bg-gray-800 text-white resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
-                <button type="submit" id="send-button" class="px-5 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-500">
-                     <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
-                </button>
-            </form>
-        </footer>
+<body class="flex h-screen">
+  <!-- Sidebar -->
+  <div class="w-64 bg-gray-900 p-4 flex flex-col">
+    <h2 class="text-lg font-bold mb-4 text-indigo-400">📂 گفتگوها</h2>
+    <div id="conversations" class="flex-1 space-y-2 overflow-y-auto">
+      <!-- گفتگوها اینجا لود میشن -->
     </div>
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    // --- DOM Elements ---
-    const elements = {
-        chatHistory: document.getElementById('chat-history'),
-        chatForm: document.getElementById('chat-form'),
-        chatInput: document.getElementById('chat-input'),
-        modelSelect: document.getElementById('model-select'),
-        sendButton: document.getElementById('send-button'),
-        newChatBtn: document.getElementById('new-chat-btn'),
-        conversationList: document.getElementById('conversation-list'),
-        chatTitle: document.getElementById('chat-title'),
-        notebook: document.getElementById('notebook'),
-        uploadBtn: document.getElementById('upload-btn'),
-        fileInput: document.getElementById('file-input'),
-        previewContainer: document.getElementById('preview-container'),
-        promptStarters: document.getElementById('prompt-starters'),
-    };
+    <button id="new-conversation" class="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-4 rounded-lg shadow">
+      ➕ گفتگوی جدید
+    </button>
+  </div>
 
-    // --- State ---
-    let state = {
-        ws: null,
-        currentConversationId: null,
-        currentAiMessageElement: null,
-        uploadedFile: null,
-        notebookSaveTimeout: null,
-    };
+  <!-- Main -->
+  <div class="flex-1 flex flex-col">
+    <!-- Header -->
+    <div class="bg-gray-800 p-4 flex justify-between items-center">
+      <div>
+        <label for="model-select" class="text-sm text-gray-300">مدل:</label>
+        <select id="model-select" class="ml-2 p-1 rounded bg-gray-700 text-white">
+          {% for key, model in models.items() %}
+            <option value="{{ key }}">{{ model.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <h1 class="text-xl font-bold text-indigo-400">🤖 Jarvis AI</h1>
+      <div>
+        <button id="open-notebook" class="bg-gray-700 hover:bg-gray-600 text-sm px-3 py-1 rounded">
+          📒 دفترچه
+        </button>
+      </div>
+    </div>
 
-    // --- WebSocket ---
-    function connectWebSocket() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        state.ws = new WebSocket(`${protocol}//${window.location.host}/api/ws/chat`);
-        state.ws.onopen = () => console.log("WebSocket connected.");
-        state.ws.onclose = () => setTimeout(connectWebSocket, 3000);
-        state.ws.onmessage = handleWebSocketMessage;
-    }
+    <!-- Chat messages -->
+    <div id="chat-box" class="flex-1 p-6 overflow-y-auto space-y-4">
+      <!-- پیام‌ها اینجا لود میشن -->
+    </div>
 
-    function handleWebSocketMessage(event) {
-        if (!event.data.startsWith('data: ')) return;
-        const rawJson = event.data.substring(6);
-        try {
-            const data = JSON.parse(rawJson);
-            if (data.error) {
-                console.error("API Error:", data.error);
-                appendChunkToAiMessage(`خطا: ${data.error}`);
-                return;
-            }
-            const textChunk = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            if (textChunk) appendChunkToAiMessage(textChunk);
-        } catch (e) { /* Ignore parsing errors */ }
-    }
+    <!-- Input -->
+    <div class="p-4 bg-gray-900 flex items-center">
+      <input id="user-input" type="text" placeholder="پیامت رو بنویس..." 
+             class="flex-1 p-2 rounded bg-gray-800 text-white border border-gray-700" />
+      <button id="send-btn" class="ml-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg shadow">
+        ارسال
+      </button>
+    </div>
+  </div>
 
-    // --- UI Rendering ---
-    function renderMessage(message, role) {
-        const bubble = document.createElement('div');
-        bubble.className = `flex gap-3 max-w-full ${role === 'user' ? 'self-end flex-row-reverse' : 'self-start'}`;
-        
-        const avatar = document.createElement('div');
-        avatar.className = `w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0 ${role === 'user' ? 'bg-indigo-700' : 'bg-gray-700'}`;
-        avatar.textContent = role === 'user' ? '👤' : '🤖';
+  <!-- Notebook Modal -->
+  <div id="notebook-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center">
+    <div class="bg-gray-800 w-2/3 p-6 rounded-lg shadow-lg">
+      <h2 class="text-lg font-bold mb-2 text-indigo-400">📒 دفترچه</h2>
+      <textarea id="notebook-content" class="w-full h-64 p-3 rounded bg-gray-900 text-white border border-gray-700"></textarea>
+      <div class="mt-3 flex justify-end space-x-2">
+        <button id="close-notebook" class="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded">بستن</button>
+        <button id="save-notebook" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded">ذخیره</button>
+      </div>
+    </div>
+  </div>
 
-        const contentWrapper = document.createElement('div');
-        contentWrapper.className = `p-4 rounded-lg ${role === 'user' ? 'bg-indigo-600' : 'bg-gray-800 ai-response-content'}`;
-        
-        let htmlContent = '';
-        if (role === 'ai') {
-            htmlContent = `<span class="thinking-text text-gray-400">جارویس در حال فکر کردن است...</span><span class="cursor"></span>`;
-            state.currentAiMessageElement = contentWrapper;
-        } else { // User message
-            const textPart = message.parts.find(p => p.text);
-            const imagePart = message.parts.find(p => p.inline_data);
-            if (textPart) htmlContent += `<p>${textPart.text}</p>`;
-            if (imagePart) htmlContent += `<img src="data:${imagePart.inline_data.mime_type};base64,${imagePart.inline_data.data}" class="max-w-xs rounded-md mt-2">`;
-        }
-        contentWrapper.innerHTML = htmlContent;
+  <script>
+    let currentConvId = null;
+    let ws = null;
 
-        bubble.appendChild(avatar);
-        bubble.appendChild(contentWrapper);
-        elements.chatHistory.appendChild(bubble);
-        scrollToBottom();
-    }
-    
-    function appendChunkToAiMessage(chunk) {
-        if (!state.currentAiMessageElement) return;
-        const thinkingText = state.currentAiMessageElement.querySelector('.thinking-text');
-        if (thinkingText) thinkingText.remove();
-        
-        const cursor = state.currentAiMessageElement.querySelector('.cursor');
-        if (cursor) cursor.remove();
-        
-        state.currentAiMessageElement.innerHTML += chunk;
-        state.currentAiMessageElement.innerHTML += '<span class="cursor"></span>';
-        scrollToBottom();
-    }
-    
-    function finalizeAiMessage() {
-        if (!state.currentAiMessageElement) return;
-        const cursor = state.currentAiMessageElement.querySelector('.cursor');
-        if (cursor) cursor.remove();
-
-        const fullText = state.currentAiMessageElement.textContent;
-        state.currentAiMessageElement.innerHTML = marked.parse(fullText);
-        
-        state.currentAiMessageElement.querySelectorAll('pre').forEach(pre => {
-            const button = document.createElement('button');
-            button.className = 'copy-btn';
-            button.innerHTML = 'کپی';
-            button.onclick = () => {
-                navigator.clipboard.writeText(pre.querySelector('code').innerText);
-                button.textContent = 'کپی شد!';
-                button.classList.add('copied');
-                setTimeout(() => { button.textContent = 'کپی'; button.classList.remove('copied'); }, 2000);
-            };
-            pre.appendChild(button);
-        });
-        hljs.highlightAll();
-        state.currentAiMessageElement = null;
-        loadConversations(); // Refresh sidebar in case title changed
-    }
-    
-    function scrollToBottom() { elements.chatHistory.scrollTop = elements.chatHistory.scrollHeight; }
-
-    function updateConversationList(conversations) {
-        elements.conversationList.innerHTML = '';
-        conversations.forEach(conv => {
-            const item = document.createElement('div');
-            item.className = `sidebar-item p-3 rounded-md cursor-pointer hover:bg-gray-700 truncate ${conv.id === state.currentConversationId ? 'active' : ''}`;
-            item.textContent = conv.title;
-            item.dataset.id = conv.id;
-            item.onclick = () => switchConversation(conv.id);
-            elements.conversationList.appendChild(item);
-        });
-    }
-
-    function displayPromptStarters() {
-        elements.chatHistory.innerHTML = `<div class="text-center text-gray-400">گفتگو را با یکی از موارد زیر شروع کنید:</div>`;
-        elements.promptStarters.innerHTML = '';
-        const starters = ["یک سناریوی خلاقانه برای یک فیلم کوتاه علمی-تخیلی بنویس.", "چگونه می‌توانم بهره‌وری خود را در طول روز افزایش دهم؟", "پنج حقیقت جالب درباره اعماق اقیانوس‌ها بگو."];
-        starters.forEach(text => {
-            const button = document.createElement('button');
-            button.className = 'bg-gray-700 p-2 rounded-lg text-sm hover:bg-gray-600';
-            button.textContent = text;
-            button.onclick = () => {
-                elements.chatInput.value = text;
-                elements.chatForm.dispatchEvent(new Event('submit'));
-            };
-            elements.promptStarters.appendChild(button);
-        });
-    }
-
-    // --- Data Fetching & State Changes ---
     async function loadConversations() {
-        const response = await fetch('/api/conversations');
-        const conversations = await response.json();
-        updateConversationList(conversations);
-        if (!state.currentConversationId && conversations.length > 0) {
-            switchConversation(conversations[0].id);
-        } else if (conversations.length === 0) {
-            createNewConversation();
+      const res = await fetch("/api/conversations");
+      const convs = await res.json();
+      const container = document.getElementById("conversations");
+      container.innerHTML = "";
+      convs.forEach(c => {
+        const div = document.createElement("div");
+        div.className = "sidebar-item cursor-pointer p-2 rounded hover:bg-gray-700";
+        div.textContent = c.title;
+        div.onclick = () => openConversation(c.id, div);
+        container.appendChild(div);
+      });
+    }
+
+    async function openConversation(id, el) {
+      currentConvId = id;
+      document.querySelectorAll(".sidebar-item").forEach(d => d.classList.remove("active"));
+      el.classList.add("active");
+
+      const res = await fetch(`/api/conversations/${id}`);
+      const messages = await res.json();
+      const chatBox = document.getElementById("chat-box");
+      chatBox.innerHTML = "";
+      messages.forEach(m => renderMessage(m));
+    }
+
+    function renderMessage(msg) {
+      const chatBox = document.getElementById("chat-box");
+      const div = document.createElement("div");
+      div.className = msg.role === "user" 
+        ? "bg-indigo-600 text-white p-3 rounded-lg w-fit ml-auto ai-response-content" 
+        : "bg-gray-700 text-white p-3 rounded-lg w-fit mr-auto ai-response-content";
+      div.textContent = msg.parts?.[0]?.text || "";
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    async function createConversation() {
+      const res = await fetch("/api/conversations", { method: "POST" });
+      const conv = await res.json();
+      await loadConversations();
+      const items = document.querySelectorAll("#conversations .sidebar-item");
+      if (items.length) openConversation(conv.id, items[0]);
+    }
+
+    function sendMessage() {
+      const input = document.getElementById("user-input");
+      const text = input.value.trim();
+      if (!text || !currentConvId) return;
+      renderMessage({role: "user", parts: [{text}]});
+      input.value = "";
+
+      const model = document.getElementById("model-select").value;
+      if (ws) ws.close();
+      ws = new WebSocket(`ws://${location.host}/api/ws/chat`);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({conversation_id: currentConvId, message: {role: "user", parts: [{text}]}, model}));
+      };
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data.replace("data: ", ""));
+        if (data.candidates) {
+          const reply = data.candidates[0].content.parts[0].text;
+          renderMessage({role: "model", parts: [{text: reply}]});
         }
+      };
     }
 
-    async function switchConversation(id) {
-        if (state.currentConversationId === id) return;
-        state.currentConversationId = id;
-        elements.chatHistory.innerHTML = '';
-        elements.promptStarters.innerHTML = '';
-        
-        const response = await fetch(`/api/conversations/${id}`);
-        const messages = await response.json();
-        
-        messages.forEach(msg => {
-            const contentWrapper = renderMessage(msg, msg.role);
-            if(msg.role === 'model') { // Render loaded model messages fully
-                state.currentAiMessageElement = contentWrapper;
-                const fullText = msg.parts.map(p => p.text).join('');
-                state.currentAiMessageElement.textContent = fullText;
-                finalizeAiMessage();
-            }
-        });
-        
-        if (messages.length === 0) displayPromptStarters();
-
-        const activeItem = elements.conversationList.querySelector(`[data-id="${id}"]`);
-        if(activeItem) {
-             elements.chatTitle.textContent = activeItem.textContent;
-             document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
-             activeItem.classList.add('active');
-        }
-    }
-
-    async function createNewConversation() {
-        const response = await fetch('/api/conversations', { method: 'POST' });
-        const newConv = await response.json();
-        await loadConversations();
-        switchConversation(newConv.id);
-    }
-    
-    async function loadNotebook() {
-        const response = await fetch('/api/notebook');
-        const data = await response.json();
-        elements.notebook.value = data.content;
-    }
-
-    async function saveNotebook() {
-        await fetch('/api/notebook', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ content: elements.notebook.value })
-        });
-    }
-    
-    // --- Event Listeners ---
-    elements.chatForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const messageText = elements.chatInput.value.trim();
-        if ((!messageText && !state.uploadedFile) || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
-        
-        finalizeAiMessage();
-        
-        let messageParts = [];
-        if (messageText) messageParts.push({ text: messageText });
-        if (state.uploadedFile) {
-            messageParts.push({ inline_data: { mime_type: state.uploadedFile.type, data: state.uploadedFile.base64 }});
-        }
-        
-        const userMessage = { role: 'user', parts: messageParts };
-        renderMessage(userMessage, 'user');
-        elements.promptStarters.innerHTML = '';
-        
-        state.ws.send(JSON.stringify({
-            conversation_id: state.currentConversationId,
-            model: elements.modelSelect.value,
-            message: userMessage
-        }));
-        
-        renderMessage(null, 'ai'); // AI thinking placeholder
-        
-        // Reset input
-        elements.chatInput.value = '';
-        state.uploadedFile = null;
-        elements.previewContainer.innerHTML = '';
-        elements.chatInput.style.height = 'auto';
-        elements.sendButton.disabled = true;
+    document.getElementById("send-btn").onclick = sendMessage;
+    document.getElementById("user-input").addEventListener("keypress", e => {
+      if (e.key === "Enter") sendMessage();
     });
 
-    elements.newChatBtn.addEventListener('click', createNewConversation);
-    elements.notebook.addEventListener('input', () => {
-        clearTimeout(state.notebookSaveTimeout);
-        state.notebookSaveTimeout = setTimeout(saveNotebook, 1000); // Debounce saving
-    });
-    
-    elements.uploadBtn.addEventListener('click', () => elements.fileInput.click());
-    elements.fileInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            state.uploadedFile = {
-                name: file.name,
-                type: file.type,
-                base64: event.target.result.split(',')[1]
-            };
-            elements.previewContainer.innerHTML = `<div class="bg-gray-700 p-2 rounded-md flex items-center justify-between"><span>${file.name}</span><button onclick="this.parentElement.remove(); window.state.uploadedFile = null;" class="text-red-400">✖</button></div>`;
-            elements.sendButton.disabled = false;
-        };
-        reader.readAsDataURL(file);
-    });
+    document.getElementById("new-conversation").onclick = createConversation;
 
-    elements.chatInput.addEventListener('input', () => {
-        elements.chatInput.style.height = 'auto';
-        elements.chatInput.style.height = `${elements.chatInput.scrollHeight}px`;
-        elements.sendButton.disabled = elements.chatInput.value.trim().length === 0 && !state.uploadedFile;
-    });
+    // Notebook
+    document.getElementById("open-notebook").onclick = async () => {
+      const res = await fetch("/api/notebook");
+      const data = await res.json();
+      document.getElementById("notebook-content").value = data.content;
+      document.getElementById("notebook-modal").classList.remove("hidden");
+    };
+    document.getElementById("close-notebook").onclick = () => {
+      document.getElementById("notebook-modal").classList.add("hidden");
+    };
+    document.getElementById("save-notebook").onclick = async () => {
+      const content = document.getElementById("notebook-content").value;
+      await fetch("/api/notebook", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({content})
+      });
+      document.getElementById("notebook-modal").classList.add("hidden");
+    };
 
-    // --- Initial Load ---
-    function initialize() {
-        connectWebSocket();
-        loadConversations();
-        loadNotebook();
-        elements.sendButton.disabled = true;
-        window.state = state; // Make state accessible for onclick in preview
-    }
-    
-    initialize();
-});
-</script>
-
+    // Init
+    loadConversations();
+  </script>
 </body>
 </html>
