@@ -6,3 +6,5 @@ google-auth
 pydantic
 cachetools
 httpx
+jinja2
+websockets
