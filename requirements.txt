@@ -11,3 +11,5 @@ google-auth
 google-auth-oauthlib
 grpcio
 grpcio-status
+pydantic
+cachetools
