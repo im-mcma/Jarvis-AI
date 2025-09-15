@@ -1,11 +1,8 @@
 fastapi
-google-cloud-firestore
-python-dotenv
-httpx
-jinja2
 uvicorn[standard]
+python-dotenv
+google-cloud-firestore
+google-auth
 pydantic
 cachetools
-google-auth
-websockets
-cachetools
+httpx
