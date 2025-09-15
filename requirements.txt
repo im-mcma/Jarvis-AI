@@ -1,9 +1,13 @@
 fastapi
 gunicorn
-httpx[http2]
+httpx
 python-dotenv
 jinja2
 google-cloud-firestore
 uvicorn[standard]
 websockets
 wsproto
+google-auth
+google-auth-oauthlib
+grpcio
+grpcio-status
