@@ -29,19 +29,16 @@
         ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #555; }
 
-        /* General UI Polish */
         .prose { color: var(--text-primary); }
         .prose pre { background-color: var(--bg-primary) !important; padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color); font-size: 0.9em; }
         .prose code { font-family: 'Cascadia Code', 'JetBrains Mono', monospace; }
-        .prose p, .prose li { user-select: text !important; } /* FIX: Allow text selection */
+        .prose p, .prose li { user-select: text !important; }
 
-        /* Animations */
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideInUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
         .animate-slide-in-up { animation: slideInUp 0.4s ease-out forwards; }
 
-        /* Specific Component Styles */
         .sidebar-item { transition: background-color 0.2s ease; border-right: 3px solid transparent; }
         .sidebar-item:hover { background-color: var(--bg-tertiary); }
         .sidebar-item.active { background-color: var(--bg-tertiary); border-color: var(--accent); }
@@ -56,11 +53,11 @@
 </head>
 <body class="flex h-screen overflow-hidden text-sm">
 
-    <aside id="sidebar" class="w-72 bg-secondary border-l border-border-color flex-shrink-0 flex flex-col transition-transform duration-300 md:relative md:translate-x-0 -translate-x-full fixed h-full z-20">
+    <aside id="sidebar" class="w-72 bg-bg-secondary border-l border-border-color flex-shrink-0 flex flex-col transition-transform duration-300 md:relative md:translate-x-0 -translate-x-full fixed h-full z-20">
         <div class="p-4 border-b border-border-color flex items-center justify-between">
             <h1 class="text-lg font-bold">Jarvis Prestige</h1>
             <button id="new-chat-btn" title="چت جدید" class="p-2 rounded-lg hover:bg-bg-tertiary">
-                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
             </button>
         </div>
         <nav id="conversation-list" class="flex-1 overflow-y-auto py-2"></nav>
@@ -94,30 +91,304 @@
                     <button type="submit" id="send-button" title="ارسال پیام" class="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-md btn-primary">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
                     </button>
+                    <button type="button" id="stop-button" title="توقف" class="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-md btn-primary hidden">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"></path></svg>
+                    </button>
                 </form>
             </div>
         </footer>
     </main>
 
 <script>
-// --- Full, Refactored JavaScript ---
-// This script is completely rewritten for better structure and to match the new UI.
-
-const App = {
-    // ... (Full JavaScript from v7.2 is compatible here)
-    // The previous script logic for handling state, messages, and API calls is stable.
-    // To avoid extreme length, please reuse the script from the previous complete response.
-    // The main changes are in the HTML structure and CSS, which this new script would interact with.
-    // Key functions to update/verify:
-    // - `renderConversationList`: Ensure it creates the new `.sidebar-item` structure.
-    // - `createMessageBubble`: Ensure it creates the new message bubble structure.
-    // - `setupEventListeners`: Connect events to the new element IDs.
-};
-
 document.addEventListener('DOMContentLoaded', () => {
-    // App.init();
-    // A simplified placeholder to illustrate the concept.
-    // Please use the full script from the previous complete response for full functionality.
+
+    const ELEMENTS = {
+        sidebar: document.getElementById('sidebar'),
+        menuBtn: document.getElementById('menu-btn'),
+        newChatBtn: document.getElementById('new-chat-btn'),
+        conversationList: document.getElementById('conversation-list'),
+        chatTitle: document.getElementById('chat-title'),
+        modelSelect: document.getElementById('model-select'),
+        chatHistory: document.getElementById('chat-history'),
+        welcomeScreen: document.getElementById('welcome-screen'),
+        chatForm: document.getElementById('chat-form'),
+        chatInput: document.getElementById('chat-input'),
+        sendButton: document.getElementById('send-button'),
+        stopButton: document.getElementById('stop-button')
+    };
+
+    let ws = null;
+    let currentConversationId = null;
+    let isTyping = false;
+    let lastMessageElement = null;
+
+    const API_URLS = {
+        models: "/api/models",
+        conversations: "/api/conversations",
+        messages: (id) => `/api/conversations/${id}`
+    };
+
+    function showLoadingIndicator() {
+        if (!isTyping) {
+            isTyping = true;
+            lastMessageElement = createMessageBubble("model", "");
+            lastMessageElement.querySelector(".message-content").innerHTML = `
+                <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                    <div class="w-2 h-2 bg-text-secondary rounded-full animate-pulse"></div>
+                    <div class="w-2 h-2 bg-text-secondary rounded-full animate-pulse delay-75"></div>
+                    <div class="w-2 h-2 bg-text-secondary rounded-full animate-pulse delay-150"></div>
+                </div>
+            `;
+            scrollToBottom();
+            ELEMENTS.sendButton.disabled = true;
+            ELEMENTS.sendButton.classList.add("hidden");
+            ELEMENTS.stopButton.classList.remove("hidden");
+        }
+    }
+
+    function hideLoadingIndicator() {
+        isTyping = false;
+        if (lastMessageElement) {
+            const loadingDots = lastMessageElement.querySelector(".animate-pulse");
+            if (loadingDots) loadingDots.parentElement.innerHTML = "";
+        }
+        ELEMENTS.sendButton.disabled = false;
+        ELEMENTS.sendButton.classList.remove("hidden");
+        ELEMENTS.stopButton.classList.add("hidden");
+    }
+
+    function createMessageBubble(role, content, conversationId = null) {
+        const bubble = document.createElement("div");
+        bubble.classList.add("message-bubble", "flex", "gap-4", "p-4", "rounded-xl", "animate-slide-in-up", "mb-4");
+        
+        const isUser = role === "user";
+        bubble.classList.add(isUser ? "bg-bg-tertiary" : "bg-bg-secondary");
+        
+        const avatar = document.createElement("div");
+        avatar.classList.add("flex-shrink-0", "w-8", "h-8", "rounded-md", "flex", "items-center", "justify-center", isUser ? "bg-accent" : "bg-bg-tertiary", "text-white");
+        avatar.innerHTML = isUser 
+            ? `<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"></path></svg>`
+            : `<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"></path></svg>`;
+        
+        const contentContainer = document.createElement("div");
+        contentContainer.classList.add("message-content", "prose", "w-full", "max-w-none", "overflow-hidden");
+        contentContainer.innerHTML = marked.parse(content);
+
+        bubble.appendChild(avatar);
+        bubble.appendChild(contentContainer);
+        ELEMENTS.chatHistory.appendChild(bubble);
+        return bubble;
+    }
+
+    function scrollToBottom() {
+        ELEMENTS.chatHistory.scrollTop = ELEMENTS.chatHistory.scrollHeight;
+    }
+
+    async function fetchConversations() {
+        try {
+            const response = await fetch(API_URLS.conversations);
+            const data = await response.json();
+            ELEMENTS.conversationList.innerHTML = '';
+            data.conversations.forEach(convo => {
+                const item = document.createElement('a');
+                item.href = "#";
+                item.classList.add('sidebar-item', 'flex', 'items-center', 'py-2', 'px-4', 'truncate');
+                item.dataset.id = convo.id;
+                item.textContent = convo.title;
+                item.addEventListener('click', () => loadConversation(convo.id));
+                ELEMENTS.conversationList.appendChild(item);
+            });
+        } catch (error) {
+            console.error("Error fetching conversations:", error);
+        }
+    }
+
+    async function loadConversation(id) {
+        currentConversationId = id;
+        ELEMENTS.welcomeScreen.classList.add('hidden');
+        ELEMENTS.chatHistory.innerHTML = '';
+        
+        const selectedItem = document.querySelector(`.sidebar-item[data-id="${id}"]`);
+        if (selectedItem) {
+            document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
+            selectedItem.classList.add('active');
+            ELEMENTS.chatTitle.textContent = selectedItem.textContent;
+        } else {
+            ELEMENTS.chatTitle.textContent = "مکالمه جدید";
+        }
+        
+        try {
+            const response = await fetch(API_URLS.messages(id));
+            if (!response.ok) {
+                if (response.status === 404) {
+                    console.warn("Conversation not found, starting new.");
+                    return newChat();
+                }
+                throw new Error("Failed to load conversation messages.");
+            }
+            const data = await response.json();
+            data.messages.forEach(msg => {
+                createMessageBubble(msg.role, msg.parts[0].text);
+            });
+            scrollToBottom();
+        } catch (error) {
+            console.error("Error loading conversation:", error);
+            createMessageBubble("model", "Error loading conversation. Please try a new chat.");
+        }
+    }
+
+    function newChat() {
+        currentConversationId = null;
+        ELEMENTS.chatHistory.innerHTML = '';
+        ELEMENTS.welcomeScreen.classList.remove('hidden');
+        ELEMENTS.chatTitle.textContent = "مکالمه جدید";
+        document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
+        ELEMENTS.chatInput.focus();
+    }
+
+    function connectWebSocket() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            return;
+        }
+        
+        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        ws = new WebSocket(`${wsProtocol}//${window.location.host}/api/ws/chat`);
+        
+        ws.onopen = () => {
+            console.log("WebSocket connected.");
+        };
+
+        ws.onmessage = (event) => {
+            if (isTyping === false) {
+                isTyping = true;
+                lastMessageElement = createMessageBubble("model", "");
+                scrollToBottom();
+            }
+            
+            try {
+                const message = JSON.parse(event.data);
+                if (message.type === "info" && message.conversation_id) {
+                    currentConversationId = message.conversation_id;
+                    const newChatTitle = "مکالمه جدید";
+                    const item = document.createElement('a');
+                    item.href = "#";
+                    item.classList.add('sidebar-item', 'flex', 'items-center', 'py-2', 'px-4', 'truncate', 'active');
+                    item.dataset.id = currentConversationId;
+                    item.textContent = newChatTitle;
+                    item.addEventListener('click', () => loadConversation(currentConversationId));
+                    document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
+                    ELEMENTS.conversationList.prepend(item);
+                    ELEMENTS.chatTitle.textContent = newChatTitle;
+                } else if (message.type === "status") {
+                    console.log("Server status:", message.message);
+                } else {
+                    hideLoadingIndicator();
+                    lastMessageElement.querySelector(".message-content").innerHTML += marked.parse(event.data);
+                    hljs.highlightAll();
+                    scrollToBottom();
+                }
+            } catch (e) {
+                hideLoadingIndicator();
+                lastMessageElement.querySelector(".message-content").innerHTML += marked.parse(event.data);
+                hljs.highlightAll();
+                scrollToBottom();
+            }
+        };
+
+        ws.onclose = () => {
+            console.log("WebSocket disconnected. Reconnecting in 5 seconds...");
+            hideLoadingIndicator();
+            setTimeout(connectWebSocket, 5000);
+        };
+        
+        ws.onerror = (error) => {
+            console.error("WebSocket error:", error);
+            ws.close();
+        };
+    }
+
+    function sendMessage(message) {
+        if (!message.trim()) return;
+        
+        showLoadingIndicator();
+        ELEMENTS.chatInput.value = '';
+        ELEMENTS.welcomeScreen.classList.add('hidden');
+        createMessageBubble("user", message);
+        scrollToBottom();
+        
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            const payload = {
+                type: "chat",
+                conversation_id: currentConversationId,
+                model: ELEMENTS.modelSelect.value,
+                message: {
+                    role: "user",
+                    parts: [{ text: message }]
+                }
+            };
+            ws.send(JSON.stringify(payload));
+        } else {
+            console.error("WebSocket is not connected.");
+            hideLoadingIndicator();
+            createMessageBubble("model", "Error: Connection lost. Please refresh the page.");
+        }
+    }
+
+    function stopGeneration() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "stop" }));
+        }
+        hideLoadingIndicator();
+    }
+
+    async function fetchAndPopulateModels() {
+        try {
+            const response = await fetch(API_URLS.models);
+            const data = await response.json();
+            const models = data.models;
+            ELEMENTS.modelSelect.innerHTML = '';
+            for (const key in models) {
+                const option = document.createElement('option');
+                option.value = key;
+                option.textContent = models[key].name;
+                option.title = models[key].description;
+                ELEMENTS.modelSelect.appendChild(option);
+            }
+        } catch (error) {
+            console.error("Error fetching models:", error);
+        }
+    }
+
+    function setupEventListeners() {
+        ELEMENTS.chatForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            sendMessage(ELEMENTS.chatInput.value);
+        });
+        
+        ELEMENTS.chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage(ELEMENTS.chatInput.value);
+            }
+        });
+
+        ELEMENTS.stopButton.addEventListener('click', stopGeneration);
+        ELEMENTS.newChatBtn.addEventListener('click', newChat);
+
+        ELEMENTS.menuBtn.addEventListener('click', () => {
+            ELEMENTS.sidebar.classList.toggle('-translate-x-full');
+        });
+    }
+
+    function init() {
+        setupEventListeners();
+        fetchAndPopulateModels();
+        fetchConversations();
+        connectWebSocket();
+    }
+    
+    init();
+
 });
 </script>
 
