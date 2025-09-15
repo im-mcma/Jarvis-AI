@@ -1,9 +1,3 @@
-import os
-import asyncio
-import uuid
-import json
-import logging
-from contextlib import asynccontextmanager
 from datetime import timedelta
 
 import httpx
@@ -27,37 +21,37 @@ CREDENTIALS_FILE = "credentials.json"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
-# --- 2. FastAPI Lifespan & App Initialization ---
+# --- 2. FastAPI App Initialization ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🚀 Jarvis v7.2 - Apex Edition is starting up...")
+    logger.info("🚀 Jarvis v8.0 - Prestige Edition is starting up...")
     yield
-    logger.info("🛑 Jarvis v7.2 is shutting down...")
+    logger.info("🛑 Jarvis v8.0 is shutting down...")
 
 app = FastAPI(
-    title="Jarvis v7.2 - Apex Edition",
-    description="The definitive, high-performance AI chat system with a polished UI and robust backend.",
-    version="7.2.0",
+    title="Jarvis v8.0 - Prestige Edition",
+    description="A completely rebuilt, professional-grade AI chat system with a superior UI/UX.",
+    version="8.0.0",
     lifespan=lifespan
 )
 templates = Jinja2Templates(directory="templates")
 
-# --- 3. Firestore & Cache Initialization (Prioritizing local file as requested) ---
+# --- 3. Firestore & Cache Initialization ---
 db = None
 try:
     if not GEMINI_API_KEY:
-        logger.warning("⚠️ GEMINI_API_KEY is not set. The application might not function correctly.")
-        
+        logger.critical("FATAL: GEMINI_API_KEY environment variable is not set.")
+    
     if os.path.exists(CREDENTIALS_FILE):
         db = firestore.AsyncClient.from_service_account_json(CREDENTIALS_FILE)
-        logger.info(f"✅ Firestore connected successfully via local '{CREDENTIALS_FILE}' file.")
+        logger.info(f"✅ Firestore connected successfully via '{CREDENTIALS_FILE}'.")
     elif "GOOGLE_CREDENTIALS_JSON" in os.environ:
         creds_json = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
         credentials = service_account.Credentials.from_service_account_info(creds_json)
         db = firestore.AsyncClient(credentials=credentials, project=credentials.project_id)
-        logger.info("✅ Firestore connected successfully via environment variable (fallback).")
+        logger.info("✅ Firestore connected successfully via environment variable.")
     else:
-        logger.warning(f"⚠️ Neither '{CREDENTIALS_FILE}' nor GOOGLE_CREDENTIALS_JSON found. DB features will be disabled.")
+        logger.warning("⚠️ Firestore credentials not found. Database features will be disabled.")
 except Exception as e:
     logger.error(f"❌ Firestore connection failed: {e}", exc_info=True)
 
@@ -65,9 +59,14 @@ cache = TTLCache(maxsize=100, ttl=timedelta(minutes=5).total_seconds())
 
 # --- 4. Gemini Models Configuration ---
 MODELS = {
-    "gemini-1.5-pro-latest": {"name": "🚀 Gemini 1.5 Pro", "description": "پیشرفته‌ترین مدل برای استدلال‌های پیچیده"},
-    "gemini-1.5-flash-latest": {"name": "⚡️ Gemini 1.5 Flash", "description": "سریع‌ترین و به صرفه‌ترین مدل برای تسک‌های حجیم"},
-    "gemini-pro": {"name": "💎 Gemini Pro", "description": "یک مدل قدرتمند و همه‌کاره برای وظایف مختلف"},
+    "gemini-2.5-pro": {"name": "🚀 Gemini 2.5 Pro", "description": "استدلال پیچیده، کدنویسی، درک چندوجهی"},
+    "gemini-2.5-flash": {"name": "⚡️ Gemini 2.5 Flash", "description": "تفکر تطبیقی، کارایی هزینه‌ای"},
+    "gemini-2.5-flash-lite": {"name": "💨 Gemini 2.5 Flash-Lite", "description": "توان عملیاتی بالا، مقرون‌به‌صرفه‌ترین"},
+    "gemini-2.0-flash": {"name": "✨ Gemini 2.0 Flash", "description": "ویژگی‌های نسل بعدی، سرعت، استریم لحظه‌ای"},
+    "gemini-2.0-flash-lite": {"name": "🍃 Gemini 2.0 Flash-Lite", "description": "کارایی هزینه‌ای و تأخیر کم"},
+    "gemini-live-2.5-flash-preview": {"name": "🔴 Gemini 2.5 Flash Live", "description": "مکالمات صوتی و تصویری دوطرفه"},
+    "gemini-2.5-flash-preview-native-audio-dialog": {"name": "🗣️ Gemini 2.5 Native Audio", "description": "خروجی‌های صوتی مکالمه‌ای طبیعی"},
+    "gemini-2.0-flash-preview-image-generation": {"name": "🎨 Gemini 2.0 Image Gen", "description": "تولید و ویرایش مکالمه‌ای تصاویر"}
 }
 
 # --- 5. Pydantic Data Models ---
