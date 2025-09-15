@@ -8,3 +8,4 @@ pydantic
 cachetools
 google-auth
 websockets
+cachetools
