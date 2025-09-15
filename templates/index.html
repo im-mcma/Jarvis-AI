@@ -1,323 +1,372 @@
 <!DOCTYPE html>
-<html lang="fa">
+<html lang="fa" dir="rtl">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Jarvis-Gemini</title>
-<link rel="preconnect" href="https://fonts.gstatic.com">
-<link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazir-font@30.1.0/dist/font-face.css" rel="stylesheet" type="text/css" />
-<style>
-:root{
-  --bg-color: #0b0d12;
-  --accent: #ff3366;
-  --muted: #bfc6d1;
-  --radius: 12px;
-}
-body{
-  margin:0;
-  font-family:"Vazir",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
-  background:var(--bg-color);
-  color:#e6eef8;
-  display:flex;
-  justify-content:center;
-  align-items:flex-start;
-  min-height:100vh;
-  direction: rtl;
-}
-.wrap{
-  width:min(1100px,95%);
-  display:grid;
-  grid-template-columns:1fr 420px;
-  gap:24px;
-  padding:24px;
-}
-.card{
-  background:rgba(11,13,18,0.95);
-  border-radius:var(--radius);
-  padding:20px;
-  box-shadow:0 8px 24px rgba(0,0,0,0.6);
-}
-h1{margin:0 0 10px 0; font-weight:700; font-size:22px;}
-p.lead{margin:0 0 16px 0; color:var(--muted); font-size:13px;}
-
-.input,textarea,select{
-  width:100%;
-  padding:10px 12px;
-  border-radius:8px;
-  border:1px solid rgba(255,255,255,0.1);
-  background:rgba(255,255,255,0.03);
-  color:#e6eef8;
-  font-size:14px;
-  outline:none;
-}
-textarea{min-height:80px; resize:vertical;}
-
-.controls{
-  display:flex;
-  gap:10px;
-  margin-top:12px;
-  flex-wrap:wrap;
-  justify-content:flex-start;
-}
-.btn{
-  padding:12px 18px;
-  border-radius:10px;
-  border:none;
-  cursor:pointer;
-  font-weight:600;
-  font-size:15px;
-  background:linear-gradient(90deg,var(--accent),#ff6699);
-  color:#fff;
-  box-shadow:0 6px 18px rgba(255,50,100,0.15);
-  transition:transform .12s ease,box-shadow .12s ease;
-}
-.btn:active{transform:translateY(1px);}
-.btn.secondary{
-  background:transparent;
-  border:1px solid rgba(255,255,255,0.1);
-  color:var(--muted);
-  box-shadow:none;
-}
-
-.advanced{
-  margin-top:14px;
-  padding:12px;
-  background:rgba(0,0,0,0.25);
-  border-radius:10px;
-  border:1px solid rgba(255,255,255,0.02);
-  display:none;
-}
-.field{margin-bottom:10px;}
-.label{font-size:12px;color:var(--muted);margin-bottom:4px;display:block;}
-
-.panel{
-  display:flex;
-  flex-direction:column;
-  gap:12px;
-  height:80vh;
-}
-.preview{
-  flex:1;
-  overflow-y:auto;
-  display:flex;
-  flex-direction:column;
-  gap:10px;
-  padding:10px;
-  border-radius:12px;
-  border:1px solid rgba(255,255,255,0.03);
-  background:rgba(255,255,255,0.02);
-}
-.msg{
-  display:inline-block;
-  max-width:70%;
-  padding:10px 14px;
-  border-radius:12px;
-  word-wrap: break-word;
-  font-size:14px;
-  position:relative;
-  animation:fadeIn 0.3s ease;
-}
-.msg.user{
-  background:linear-gradient(135deg,#3b82f6,#60a5fa);
-  color:white;
-  margin-left:auto;
-  text-align:right;
-}
-.msg.assistant{
-  background:linear-gradient(135deg,#10b981,#34d399);
-  color:white;
-  margin-right:auto;
-  text-align:right;
-}
-@keyframes fadeIn{
-  from{opacity:0; transform:translateY(8px);}
-  to{opacity:1; transform:translateY(0);}
-}
-
-.adv-toggle{
-  cursor:pointer;
-  color:var(--accent);
-  font-size:13px;
-  margin-bottom:8px;
-  display:inline-block;
-}
-.spinner{
-  width:30px;height:30px;border-radius:50%;
-  border:3px solid rgba(255,255,255,0.08);
-  border-top-color:var(--accent);
-  animation:spin 1s linear infinite;
-}
-@keyframes spin{to{transform:rotate(360deg);}}
-#errorBox{
-  color:#ff9aa8;
-  font-size:13px;
-  margin-top:8px;
-}
-#downloadBtn{
-  margin-top:8px;
-  display:none;
-}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis-Ai</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.0.3/Vazirmatn-font-face.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    
+    <style>
+        :root {
+            --bg-primary: #111827; /* bg-gray-900 */
+            --bg-secondary: #1F2937; /* bg-gray-800 */
+            --bg-tertiary: #374151; /* bg-gray-700 */
+            --border-color: #4B5563; /* bg-gray-600 */
+            --text-primary: #F3F4F6; /* text-gray-100 */
+            --text-secondary: #9CA3AF; /* text-gray-400 */
+            --accent-primary: #4f46e5; /* indigo-600 */
+            --accent-hover: #4338ca; /* indigo-700 */
+        }
+        body {
+            font-family: 'Vazirmatn', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+        }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-secondary); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+        .sidebar-item.active { background-color: var(--accent-primary) !important; color: white; }
+        .ai-response-content pre { position: relative; }
+        .copy-btn { position: absolute; top: 0.5rem; left: 0.5rem; background-color: var(--bg-tertiary); color: white; border: none; padding: 0.5rem; border-radius: 0.25rem; cursor: pointer; opacity: 0; transition: opacity 0.2s; }
+        .ai-response-content pre:hover .copy-btn { opacity: 1; }
+        .copy-btn.copied { background-color: #059669; }
+        .cursor { display: inline-block; width: 10px; height: 1.2rem; background-color: var(--text-primary); animation: blink 1s infinite; vertical-align: middle; }
+        @keyframes blink { 50% { opacity: 0; } }
+    </style>
 </head>
-<body>
-<div class="wrap">
 
-<!-- LEFT: inputs -->
-<div class="card">
-  <h1>Jarvis-Gemini</h1>
-  <p class="lead">پیام خود را وارد کنید و مدل را انتخاب کنید.</p>
+<body class="flex h-screen antialiased">
+    <aside class="w-72 bg-gray-900 flex flex-col p-2 border-l border-gray-700">
+        <button id="new-chat-btn" class="w-full text-right p-3 mb-2 rounded-md hover:bg-gray-700 transition-colors flex items-center gap-2">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+            گفتگوی جدید
+        </button>
+        <div id="conversation-list" class="flex-grow overflow-y-auto"></div>
+        <div class="mt-auto pt-2 border-t border-gray-700">
+             <h3 class="text-lg font-semibold p-2">دفترچه یادداشت</h3>
+             <textarea id="notebook" class="w-full h-32 p-2 bg-gray-800 text-gray-200 border border-gray-600 rounded-md resize-none" placeholder="نکات خود را اینجا بنویسید..."></textarea>
+        </div>
+    </aside>
 
-  <div class="field">
-    <label class="label">متن پیام</label>
-    <textarea id="input" class="input" placeholder="پیام خود را بنویسید..."></textarea>
-  </div>
+    <div class="flex flex-col flex-1 h-full">
+        <header class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/80 backdrop-blur-sm sticky top-0 z-10">
+            <h1 id="chat-title" class="text-xl font-bold text-white">Jarvis-Ai</h1>
+            <select id="model-select" class="p-2 bg-gray-800 text-white border border-gray-600 rounded-md text-sm cursor-pointer">
+                {% for key, model in models.items() %}
+                <option value="{{ key }}">{{ model.name }}</option>
+                {% endfor %}
+            </select>
+        </header>
 
-  <div class="field">
-    <label class="label">مدل</label>
-    <select id="model-select" class="input"></select>
-  </div>
+        <main id="chat-history" class="flex-grow p-4 overflow-y-auto space-y-6"></main>
 
-  <div class="controls">
-    <button id="send" class="btn">ارسال</button>
-    <button id="downloadBtn" class="btn secondary">دانلود چت</button>
-  </div>
-
-  <span class="adv-toggle" id="toggleAdvanced">▼ تنظیمات پیشرفته</span>
-  <div class="advanced" id="advanced">
-    <div class="field">
-      <label class="label">گزینه پیشرفته ۱</label>
-      <input class="input" placeholder="مثال" />
+        <footer class="p-4 border-t border-gray-700 bg-gray-900">
+            <div id="prompt-starters" class="flex gap-2 mb-2 justify-center"></div>
+            <div id="preview-container" class="mb-2"></div>
+            <form id="chat-form" class="flex gap-3 items-end">
+                <button type="button" id="upload-btn" title="آپلود تصویر" class="p-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600">
+                     <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l-1-1a2 2 0 010-2.828l1-1"></path><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
+                </button>
+                <input type="file" id="file-input" accept="image/*" class="hidden">
+                <textarea id="chat-input" placeholder="یک پیام بنویسید..." rows="1" class="flex-grow p-3 rounded-lg border border-gray-600 bg-gray-800 text-white resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+                <button type="submit" id="send-button" class="px-5 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-500">
+                     <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
+                </button>
+            </form>
+        </footer>
     </div>
-    <div class="field">
-      <label class="label">گزینه پیشرفته ۲</label>
-      <input class="input" placeholder="مثال" />
-    </div>
-  </div>
-
-  <div id="errorBox"></div>
-</div>
-
-<!-- RIGHT: preview -->
-<div class="panel">
-  <div class="card preview" id="previewBox">
-    <div id="placeholderBox" style="text-align:center;color:var(--muted);padding:18px;">
-      پیام‌ها اینجا نمایش داده می‌شوند
-    </div>
-  </div>
-</div>
-</div>
-
 <script>
-const sendBtn=document.getElementById('send');
-const inputEl=document.getElementById('input');
-const modelSelect=document.getElementById('model-select');
-const previewBox=document.getElementById('previewBox');
-const placeholderBox=document.getElementById('placeholderBox');
-const errorBox=document.getElementById('errorBox');
-const advToggle=document.getElementById('toggleAdvanced');
-const advanced=document.getElementById('advanced');
-const downloadBtn=document.getElementById('downloadBtn');
+document.addEventListener('DOMContentLoaded', () => {
+    // --- DOM Elements ---
+    const elements = {
+        chatHistory: document.getElementById('chat-history'),
+        chatForm: document.getElementById('chat-form'),
+        chatInput: document.getElementById('chat-input'),
+        modelSelect: document.getElementById('model-select'),
+        sendButton: document.getElementById('send-button'),
+        newChatBtn: document.getElementById('new-chat-btn'),
+        conversationList: document.getElementById('conversation-list'),
+        chatTitle: document.getElementById('chat-title'),
+        notebook: document.getElementById('notebook'),
+        uploadBtn: document.getElementById('upload-btn'),
+        fileInput: document.getElementById('file-input'),
+        previewContainer: document.getElementById('preview-container'),
+        promptStarters: document.getElementById('prompt-starters'),
+    };
 
-advToggle.addEventListener('click',()=>{
-  if(advanced.style.display==='none'||advanced.style.display===''){
-    advanced.style.display='block';
-    advToggle.textContent='▲ تنظیمات پیشرفته';
-  }else{
-    advanced.style.display='none';
-    advToggle.textContent='▼ تنظیمات پیشرفته';
-  }
-});
+    // --- State ---
+    let state = {
+        ws: null,
+        currentConversationId: null,
+        currentAiMessageElement: null,
+        uploadedFile: null,
+        notebookSaveTimeout: null,
+    };
 
-let messages=[];
-
-// بارگذاری مدل‌ها از سرور
-async function loadModels(){
-  try{
-    const resp=await fetch('/api/models');
-    const data=await resp.json();
-    modelSelect.innerHTML='';
-    for(const key in data){
-      const opt=document.createElement('option');
-      opt.value=key;
-      opt.textContent=`${data[key].emoji} ${data[key].name}`;
-      if(key==='gemini-2.0-flash') opt.selected=true;
-      modelSelect.appendChild(opt);
+    // --- WebSocket ---
+    function connectWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        state.ws = new WebSocket(`${protocol}//${window.location.host}/api/ws/chat`);
+        state.ws.onopen = () => console.log("WebSocket connected.");
+        state.ws.onclose = () => setTimeout(connectWebSocket, 3000);
+        state.ws.onmessage = handleWebSocketMessage;
     }
-  }catch(e){
-    errorBox.textContent="خطا در دریافت مدل‌ها: "+e.message;
-  }
-}
 
-// نمایش پیام
-function addMessage(role,content){
-  const div=document.createElement('div');
-  div.className=`msg ${role}`;
-  div.textContent=content;
-  previewBox.appendChild(div);
-  previewBox.scrollTop=previewBox.scrollHeight;
-}
+    function handleWebSocketMessage(event) {
+        if (!event.data.startsWith('data: ')) return;
+        const rawJson = event.data.substring(6);
+        try {
+            const data = JSON.parse(rawJson);
+            if (data.error) {
+                console.error("API Error:", data.error);
+                appendChunkToAiMessage(`خطا: ${data.error}`);
+                return;
+            }
+            const textChunk = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            if (textChunk) appendChunkToAiMessage(textChunk);
+        } catch (e) { /* Ignore parsing errors */ }
+    }
 
-// ارسال پیام به سرور
-async function sendMessage(){
-  const text=inputEl.value.trim();
-  if(!text) return;
-  const model=modelSelect.value;
+    // --- UI Rendering ---
+    function renderMessage(message, role) {
+        const bubble = document.createElement('div');
+        bubble.className = `flex gap-3 max-w-full ${role === 'user' ? 'self-end flex-row-reverse' : 'self-start'}`;
+        
+        const avatar = document.createElement('div');
+        avatar.className = `w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0 ${role === 'user' ? 'bg-indigo-700' : 'bg-gray-700'}`;
+        avatar.textContent = role === 'user' ? '👤' : '🤖';
 
-  addMessage('user',text);
-  messages.push({role:'user',content:text});
-  inputEl.value='';
-  placeholderBox.style.display='none';
+        const contentWrapper = document.createElement('div');
+        contentWrapper.className = `p-4 rounded-lg ${role === 'user' ? 'bg-indigo-600' : 'bg-gray-800 ai-response-content'}`;
+        
+        let htmlContent = '';
+        if (role === 'ai') {
+            htmlContent = `<span class="thinking-text text-gray-400">جارویس در حال فکر کردن است...</span><span class="cursor"></span>`;
+            state.currentAiMessageElement = contentWrapper;
+        } else { // User message
+            const textPart = message.parts.find(p => p.text);
+            const imagePart = message.parts.find(p => p.inline_data);
+            if (textPart) htmlContent += `<p>${textPart.text}</p>`;
+            if (imagePart) htmlContent += `<img src="data:${imagePart.inline_data.mime_type};base64,${imagePart.inline_data.data}" class="max-w-xs rounded-md mt-2">`;
+        }
+        contentWrapper.innerHTML = htmlContent;
 
-  const spinner=document.createElement('div');
-  spinner.className='spinner';
-  previewBox.appendChild(spinner);
-  previewBox.scrollTop=previewBox.scrollHeight;
+        bubble.appendChild(avatar);
+        bubble.appendChild(contentWrapper);
+        elements.chatHistory.appendChild(bubble);
+        scrollToBottom();
+    }
+    
+    function appendChunkToAiMessage(chunk) {
+        if (!state.currentAiMessageElement) return;
+        const thinkingText = state.currentAiMessageElement.querySelector('.thinking-text');
+        if (thinkingText) thinkingText.remove();
+        
+        const cursor = state.currentAiMessageElement.querySelector('.cursor');
+        if (cursor) cursor.remove();
+        
+        state.currentAiMessageElement.innerHTML += chunk;
+        state.currentAiMessageElement.innerHTML += '<span class="cursor"></span>';
+        scrollToBottom();
+    }
+    
+    function finalizeAiMessage() {
+        if (!state.currentAiMessageElement) return;
+        const cursor = state.currentAiMessageElement.querySelector('.cursor');
+        if (cursor) cursor.remove();
 
-  try{
-    const resp=await fetch('/api/chat',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({messages:messages,model:model})
+        const fullText = state.currentAiMessageElement.textContent;
+        state.currentAiMessageElement.innerHTML = marked.parse(fullText);
+        
+        state.currentAiMessageElement.querySelectorAll('pre').forEach(pre => {
+            const button = document.createElement('button');
+            button.className = 'copy-btn';
+            button.innerHTML = 'کپی';
+            button.onclick = () => {
+                navigator.clipboard.writeText(pre.querySelector('code').innerText);
+                button.textContent = 'کپی شد!';
+                button.classList.add('copied');
+                setTimeout(() => { button.textContent = 'کپی'; button.classList.remove('copied'); }, 2000);
+            };
+            pre.appendChild(button);
+        });
+        hljs.highlightAll();
+        state.currentAiMessageElement = null;
+        loadConversations(); // Refresh sidebar in case title changed
+    }
+    
+    function scrollToBottom() { elements.chatHistory.scrollTop = elements.chatHistory.scrollHeight; }
+
+    function updateConversationList(conversations) {
+        elements.conversationList.innerHTML = '';
+        conversations.forEach(conv => {
+            const item = document.createElement('div');
+            item.className = `sidebar-item p-3 rounded-md cursor-pointer hover:bg-gray-700 truncate ${conv.id === state.currentConversationId ? 'active' : ''}`;
+            item.textContent = conv.title;
+            item.dataset.id = conv.id;
+            item.onclick = () => switchConversation(conv.id);
+            elements.conversationList.appendChild(item);
+        });
+    }
+
+    function displayPromptStarters() {
+        elements.chatHistory.innerHTML = `<div class="text-center text-gray-400">گفتگو را با یکی از موارد زیر شروع کنید:</div>`;
+        elements.promptStarters.innerHTML = '';
+        const starters = ["یک سناریوی خلاقانه برای یک فیلم کوتاه علمی-تخیلی بنویس.", "چگونه می‌توانم بهره‌وری خود را در طول روز افزایش دهم؟", "پنج حقیقت جالب درباره اعماق اقیانوس‌ها بگو."];
+        starters.forEach(text => {
+            const button = document.createElement('button');
+            button.className = 'bg-gray-700 p-2 rounded-lg text-sm hover:bg-gray-600';
+            button.textContent = text;
+            button.onclick = () => {
+                elements.chatInput.value = text;
+                elements.chatForm.dispatchEvent(new Event('submit'));
+            };
+            elements.promptStarters.appendChild(button);
+        });
+    }
+
+    // --- Data Fetching & State Changes ---
+    async function loadConversations() {
+        const response = await fetch('/api/conversations');
+        const conversations = await response.json();
+        updateConversationList(conversations);
+        if (!state.currentConversationId && conversations.length > 0) {
+            switchConversation(conversations[0].id);
+        } else if (conversations.length === 0) {
+            createNewConversation();
+        }
+    }
+
+    async function switchConversation(id) {
+        if (state.currentConversationId === id) return;
+        state.currentConversationId = id;
+        elements.chatHistory.innerHTML = '';
+        elements.promptStarters.innerHTML = '';
+        
+        const response = await fetch(`/api/conversations/${id}`);
+        const messages = await response.json();
+        
+        messages.forEach(msg => {
+            const contentWrapper = renderMessage(msg, msg.role);
+            if(msg.role === 'model') { // Render loaded model messages fully
+                state.currentAiMessageElement = contentWrapper;
+                const fullText = msg.parts.map(p => p.text).join('');
+                state.currentAiMessageElement.textContent = fullText;
+                finalizeAiMessage();
+            }
+        });
+        
+        if (messages.length === 0) displayPromptStarters();
+
+        const activeItem = elements.conversationList.querySelector(`[data-id="${id}"]`);
+        if(activeItem) {
+             elements.chatTitle.textContent = activeItem.textContent;
+             document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+             activeItem.classList.add('active');
+        }
+    }
+
+    async function createNewConversation() {
+        const response = await fetch('/api/conversations', { method: 'POST' });
+        const newConv = await response.json();
+        await loadConversations();
+        switchConversation(newConv.id);
+    }
+    
+    async function loadNotebook() {
+        const response = await fetch('/api/notebook');
+        const data = await response.json();
+        elements.notebook.value = data.content;
+    }
+
+    async function saveNotebook() {
+        await fetch('/api/notebook', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ content: elements.notebook.value })
+        });
+    }
+    
+    // --- Event Listeners ---
+    elements.chatForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const messageText = elements.chatInput.value.trim();
+        if ((!messageText && !state.uploadedFile) || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+        
+        finalizeAiMessage();
+        
+        let messageParts = [];
+        if (messageText) messageParts.push({ text: messageText });
+        if (state.uploadedFile) {
+            messageParts.push({ inline_data: { mime_type: state.uploadedFile.type, data: state.uploadedFile.base64 }});
+        }
+        
+        const userMessage = { role: 'user', parts: messageParts };
+        renderMessage(userMessage, 'user');
+        elements.promptStarters.innerHTML = '';
+        
+        state.ws.send(JSON.stringify({
+            conversation_id: state.currentConversationId,
+            model: elements.modelSelect.value,
+            message: userMessage
+        }));
+        
+        renderMessage(null, 'ai'); // AI thinking placeholder
+        
+        // Reset input
+        elements.chatInput.value = '';
+        state.uploadedFile = null;
+        elements.previewContainer.innerHTML = '';
+        elements.chatInput.style.height = 'auto';
+        elements.sendButton.disabled = true;
     });
-    const data=await resp.json();
-    const reply=data?.candidates?.[0]?.content?.parts?.[0]?.text || 'خطا';
-    previewBox.removeChild(spinner);
-    addMessage('assistant',reply);
-    messages.push({role:'assistant',content:reply});
-    localStorage.setItem('chat_messages',JSON.stringify(messages));
-  }catch(err){
-    previewBox.removeChild(spinner);
-    addMessage('assistant','خطا در دریافت پاسخ');
-    console.error(err);
-  }
-}
 
-// بارگذاری چت ذخیره شده
-function loadChat(){
-  const stored=localStorage.getItem('chat_messages');
-  if(stored){
-    messages=JSON.parse(stored);
-    messages.forEach(m=>addMessage(m.role,m.content));
-    placeholderBox.style.display='none';
-  }
-}
+    elements.newChatBtn.addEventListener('click', createNewConversation);
+    elements.notebook.addEventListener('input', () => {
+        clearTimeout(state.notebookSaveTimeout);
+        state.notebookSaveTimeout = setTimeout(saveNotebook, 1000); // Debounce saving
+    });
+    
+    elements.uploadBtn.addEventListener('click', () => elements.fileInput.click());
+    elements.fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            state.uploadedFile = {
+                name: file.name,
+                type: file.type,
+                base64: event.target.result.split(',')[1]
+            };
+            elements.previewContainer.innerHTML = `<div class="bg-gray-700 p-2 rounded-md flex items-center justify-between"><span>${file.name}</span><button onclick="this.parentElement.remove(); window.state.uploadedFile = null;" class="text-red-400">✖</button></div>`;
+            elements.sendButton.disabled = false;
+        };
+        reader.readAsDataURL(file);
+    });
 
-// دکمه دانلود چت
-downloadBtn.addEventListener('click',()=>{
-  const blob=new Blob([messages.map(m=>`${m.role}: ${m.content}`).join('\n\n')],{type:'text/plain;charset=utf-8'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url;
-  a.download='chat.txt';
-  a.click();
-  URL.revokeObjectURL(url);
+    elements.chatInput.addEventListener('input', () => {
+        elements.chatInput.style.height = 'auto';
+        elements.chatInput.style.height = `${elements.chatInput.scrollHeight}px`;
+        elements.sendButton.disabled = elements.chatInput.value.trim().length === 0 && !state.uploadedFile;
+    });
+
+    // --- Initial Load ---
+    function initialize() {
+        connectWebSocket();
+        loadConversations();
+        loadNotebook();
+        elements.sendButton.disabled = true;
+        window.state = state; // Make state accessible for onclick in preview
+    }
+    
+    initialize();
 });
-
-sendBtn.addEventListener('click',sendMessage);
-inputEl.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey) sendMessage();});
-
-loadModels();
-loadChat();
 </script>
+
 </body>
 </html>
