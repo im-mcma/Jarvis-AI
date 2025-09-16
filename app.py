@@ -1,15 +1,13 @@
-# app.py
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, BackgroundTasks, status
-from datetime import timedelta
 import os
 import json
 import asyncio
 import logging
 import uuid
+import httpx
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, AsyncGenerator
-
-import httpx
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, BackgroundTasks, status
+from datetime import timedelta
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
@@ -63,7 +61,11 @@ app = FastAPI(
     version="8.1.0",
     lifespan=lifespan
 )
-templates = Jinja2Templates(directory=".")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 # --- 3. راه‌اندازی Firestore و Cache (Firestore & Cache Initialization) ---
 db = None
