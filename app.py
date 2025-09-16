@@ -1,5 +1,5 @@
 # app.py
-
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, BackgroundTasks, status # ارتقا: status اضافه شد
 from datetime import timedelta
 import os
 import json
@@ -107,6 +107,11 @@ async def gemini_chat_stream(messages: List[Dict], model: str, stop_event: async
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
             async with client.stream("POST", url, json=payload, headers=headers) as response:
+                if response.status_code != 200:
+                    error_body = await response.aread()
+                    logger.error(f"Non-200 response from Gemini: {response.status_code} - {error_body.decode()}")
+                    yield {"type": "error", "content": f"API Error: {error_body.decode()}"}
+                    return
                 response.raise_for_status()
                 buffer = ""
                 async for raw_chunk in response.aiter_bytes():
@@ -136,10 +141,10 @@ async def gemini_chat_stream(messages: List[Dict], model: str, stop_event: async
                             buffer = part # Incomplete JSON, wait for next chunk
                             continue
         
-        except httpx.HTTPStatusError as e:
-            error_body = await e.response.aread()
-            logger.error(f"HTTP error during stream: {e.response.status_code} - {error_body.decode()}", exc_info=True)
-            yield {"type": "error", "content": f"HTTP error: {e.response.status_code}"}
+        except httpx.RequestError as e:
+            logger.error(f"HTTP request error in gemini_chat_stream: {e}", exc_info=True)
+            yield {"type": "error", "content": f"Network error connecting to Gemini API: {str(e)}"}
+        # .
         except Exception as e:
             logger.error(f"An unexpected error occurred in gemini_chat_stream: {e}", exc_info=True)
             yield {"type": "error", "content": f"Unexpected error: {str(e)}"}
@@ -180,6 +185,29 @@ async def get_messages_from_db(conversation_id: str) -> List[Dict]:
         logger.error(f"Error fetching messages for {conversation_id}: {e}", exc_info=True)
         return []
 
+    async def delete_conversation_from_db(conversation_id: str):
+    if not db:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database not configured")
+         try:
+        convo_ref = db.collection(USERS_COLLECTION).document(USER_ID).collection(CONVERSATIONS_COLLECTION).document(conversation_id)
+
+# حذف تمام پیام‌ها در subcollection
+        messages_ref = convo_ref.collection(MESSAGES_COLLECTION)
+        docs = await messages_ref.limit(500).get() # Batch delete
+        while docs:
+            batch = db.batch()
+            for doc in docs:
+                batch.delete(doc.reference)
+            await batch.commit()
+            docs = await messages_ref.limit(500).get()
+
+await convo_ref.delete()
+        logger.info(f"Successfully deleted conversation {conversation_id} and its messages.")
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting conversation {conversation_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete conversation: {e}")
+
 async def get_conversations_from_db() -> List[Dict]:
     if not db: return []
     try:
@@ -195,7 +223,11 @@ async def get_conversations_from_db() -> List[Dict]:
         return []
 
 # --- 7. API Endpoints ---
-@app.get("/", response_class=HTMLResponse)
+
+@app.get("/api/conversations/{conversation_id}")
+async def get_conversation_details(conversation_id: str):
+    
+    @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
@@ -208,6 +240,11 @@ async def get_conversations():
     conversations = await get_conversations_from_db()
     return JSONResponse(content={"conversations": conversations})
 
+    @app.delete("/api/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(conversation_id: str):
+    await delete_conversation_from_db(conversation_id)
+    return
+    
 @app.get("/api/conversations/{conversation_id}")
 async def get_conversation_details(conversation_id: str):
     messages = await get_messages_from_db(conversation_id)
