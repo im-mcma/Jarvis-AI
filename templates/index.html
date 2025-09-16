@@ -1,396 +1,306 @@
-<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jarvis v8.0 - Prestige Edition</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --font-family: 'Vazirmatn', sans-serif;
-            --bg-primary: #111111;
-            --bg-secondary: #1C1C1C;
-            --bg-tertiary: #2A2A2A;
-            --border-color: #333333;
-            --text-primary: #F0F0F0;
-            --text-secondary: #A0A0A0;
-            --accent: #6A45FF;
-            --accent-hover: #5838D9;
-        }
-        body { font-family: var(--font-family); background-color: var(--bg-primary); color: var(--text-primary); }
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: var(--bg-secondary); }
-        ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #555; }
+from datetime import timedelta
+import os
+import json
+import asyncio
+import logging
+import uuid # <-- بهبود: ایمپورت کردن ماژول فراموش شده
+from contextlib import asynccontextmanager
+from typing import List, Dict, Any, AsyncGenerator
 
-        .prose { color: var(--text-primary); }
-        .prose pre { background-color: var(--bg-primary) !important; padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color); font-size: 0.9em; }
-        .prose code { font-family: 'Cascadia Code', 'JetBrains Mono', monospace; }
-        .prose p, .prose li { user-select: text !important; }
+import httpx
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, BackgroundTasks
+from fastapi.responses import JSONResponse
+from fastapi.templating import Jinja2Templates
+from dotenv import load_dotenv
+from google.cloud import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
+from google.oauth2 import service_account
+from pydantic import BaseModel
+from cachetools import TTLCache
 
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideInUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
-        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
-        .animate-slide-in-up { animation: slideInUp 0.4s ease-out forwards; }
+# --- 1. Basic Configuration & Constants ---
+load_dotenv()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-        .sidebar-item { transition: background-color 0.2s ease; border-right: 3px solid transparent; }
-        .sidebar-item:hover { background-color: var(--bg-tertiary); }
-        .sidebar-item.active { background-color: var(--bg-tertiary); border-color: var(--accent); }
-        
-        #chat-input { background-color: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); transition: border-color 0.2s, box-shadow 0.2s; }
-        #chat-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(106, 69, 255, 0.3); }
+USER_ID = "main_user"
+CREDENTIALS_FILE = "credentials.json"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    logger.critical("FATAL: GEMINI_API_KEY environment variable is not set.")
+    raise ValueError("GEMINI_API_KEY is missing.")
 
-        .btn-primary { background-color: var(--accent); color: white; transition: background-color 0.2s ease; }
-        .btn-primary:hover:not(:disabled) { background-color: var(--accent-hover); }
-        .btn-primary:disabled { background-color: #444; cursor: not-allowed; }
-    </style>
-</head>
-<body class="flex h-screen overflow-hidden text-sm">
+GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+# بهبود: تعریف نام collection ها به عنوان ثابت
+USERS_COLLECTION = "users"
+CONVERSATIONS_COLLECTION = "conversations"
+MESSAGES_COLLECTION = "messages"
 
-    <aside id="sidebar" class="w-72 bg-bg-secondary border-l border-border-color flex-shrink-0 flex flex-col transition-transform duration-300 md:relative md:translate-x-0 -translate-x-full fixed h-full z-20">
-        <div class="p-4 border-b border-border-color flex items-center justify-between">
-            <h1 class="text-lg font-bold">Jarvis Prestige</h1>
-            <button id="new-chat-btn" title="چت جدید" class="p-2 rounded-lg hover:bg-bg-tertiary">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-            </button>
-        </div>
-        <nav id="conversation-list" class="flex-1 overflow-y-auto py-2"></nav>
-    </aside>
 
-    <main class="flex-1 flex flex-col bg-bg-primary">
-        <header class="flex-shrink-0 p-3 border-b border-border-color flex items-center justify-between">
-            <div class="flex items-center gap-2">
-                <button id="menu-btn" class="md:hidden p-2 rounded-lg hover:bg-bg-tertiary">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
-                </button>
-                <h2 id="chat-title" class="font-bold text-base text-text-primary truncate">مکالمه جدید</h2>
-            </div>
-            <select id="model-select" class="bg-bg-secondary border border-border-color rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent"></select>
-        </header>
-        
-        <div id="chat-history" class="flex-1 p-6 overflow-y-auto">
-            <div id="welcome-screen" class="h-full flex flex-col items-center justify-center text-center">
-                <div class="w-16 h-16 bg-bg-secondary rounded-2xl flex items-center justify-center mb-4">
-                    <svg class="w-8 h-8 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.293 2.293a1 1 0 010 1.414L11 15H9v-2l6.293-6.293a1 1 0 011.414 0L19 9m-5 4v2m0 0h2m-2 0l2.293 2.293a1 1 0 001.414 0L19 15m-2-7h2m-2 0v2"></path></svg>
-                </div>
-                <h2 class="text-xl font-bold">Jarvis Prestige Edition</h2>
-                <p class="text-text-secondary mt-2">چگونه می‌توانم امروز به شما کمک کنم؟</p>
-            </div>
-        </div>
-        
-        <footer class="p-4 flex-shrink-0">
-            <div class="relative max-w-4xl mx-auto">
-                <form id="chat-form">
-                    <textarea id="chat-input" placeholder="پیام خود را اینجا بنویسید..." rows="1" class="w-full rounded-lg py-3 pl-12 pr-4 resize-none"></textarea>
-                    <button type="submit" id="send-button" title="ارسال پیام" class="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-md btn-primary">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-                    </button>
-                    <button type="button" id="stop-button" title="توقف" class="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-md btn-primary hidden">
-                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"></path></svg>
-                    </button>
-                </form>
-            </div>
-        </footer>
-    </main>
+# --- 2. FastAPI App Initialization ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("🚀 Jarvis v8.1 - Prestige Pro is starting up...")
+    yield
+    logger.info("🛑 Jarvis v8.1 is shutting down...")
 
-<script>
-document.addEventListener('DOMContentLoaded', () => {
+app = FastAPI(
+    title="Jarvis v8.1 - Prestige Pro",
+    description="A professional-grade AI chat system with an improved UI/UX and scalable backend.",
+    version="8.1.0",
+    lifespan=lifespan
+)
+templates = Jinja2Templates(directory=".")
 
-    const ELEMENTS = {
-        sidebar: document.getElementById('sidebar'),
-        menuBtn: document.getElementById('menu-btn'),
-        newChatBtn: document.getElementById('new-chat-btn'),
-        conversationList: document.getElementById('conversation-list'),
-        chatTitle: document.getElementById('chat-title'),
-        modelSelect: document.getElementById('model-select'),
-        chatHistory: document.getElementById('chat-history'),
-        welcomeScreen: document.getElementById('welcome-screen'),
-        chatForm: document.getElementById('chat-form'),
-        chatInput: document.getElementById('chat-input'),
-        sendButton: document.getElementById('send-button'),
-        stopButton: document.getElementById('stop-button')
-    };
+# --- 3. Firestore & Cache Initialization ---
+db = None
+try:
+    if os.path.exists(CREDENTIALS_FILE):
+        db = firestore.AsyncClient.from_service_account_json(CREDENTIALS_FILE)
+        logger.info(f"✅ Firestore connected successfully via '{CREDENTIALS_FILE}'.")
+    elif "GOOGLE_CREDENTIALS_JSON" in os.environ:
+        creds_json = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
+        credentials = service_account.Credentials.from_service_account_info(creds_json)
+        db = firestore.AsyncClient(credentials=credentials, project=credentials.project_id)
+        logger.info("✅ Firestore connected successfully via environment variable.")
+    else:
+        logger.warning("⚠️ Firestore credentials not found. Database features will be disabled.")
+except Exception as e:
+    logger.error(f"❌ Firestore connection failed: {e}", exc_info=True)
+    db = None
 
-    let ws = null;
-    let currentConversationId = null;
-    let isTyping = false;
-    let lastMessageElement = null;
+cache = TTLCache(maxsize=100, ttl=timedelta(minutes=5).total_seconds())
 
-    const API_URLS = {
-        models: "/api/models",
-        conversations: "/api/conversations",
-        messages: (id) => `/api/conversations/${id}`
-    };
+# --- 4. Gemini Models Configuration (Unchanged as requested) ---
+MODELS = {
+    "gemini-1.5-pro-latest": {"name": "🚀 Gemini 1.5 Pro", "description": "استدلال پیچیده، کدنویسی، درک چندوجهی"},
+    "gemini-1.5-flash-latest": {"name": "⚡️ Gemini 1.5 Flash", "description": "تفکر تطبیقی، کارایی هزینه‌ای"},
+    # Note: Some model names might have been updated by Google. Using more standard names.
+    "gemini-pro": {"name": "✨ Gemini Pro", "description": "ویژگی‌های نسل بعدی، سرعت، استریم لحظه‌ای"},
+}
 
-    function showLoadingIndicator() {
-        if (!isTyping) {
-            isTyping = true;
-            lastMessageElement = createMessageBubble("model", "");
-            lastMessageElement.querySelector(".message-content").innerHTML = `
-                <div class="flex items-center space-x-2 rtl:space-x-reverse">
-                    <div class="w-2 h-2 bg-text-secondary rounded-full animate-pulse"></div>
-                    <div class="w-2 h-2 bg-text-secondary rounded-full animate-pulse delay-75"></div>
-                    <div class="w-2 h-2 bg-text-secondary rounded-full animate-pulse delay-150"></div>
-                </div>
-            `;
-            scrollToBottom();
-            ELEMENTS.sendButton.disabled = true;
-            ELEMENTS.sendButton.classList.add("hidden");
-            ELEMENTS.stopButton.classList.remove("hidden");
-        }
-    }
+# --- 5. Pydantic Data Models (Unchanged) ---
+class MessagePart(BaseModel):
+    text: str
 
-    function hideLoadingIndicator() {
-        isTyping = false;
-        if (lastMessageElement) {
-            const loadingDots = lastMessageElement.querySelector(".animate-pulse");
-            if (loadingDots) loadingDots.parentElement.innerHTML = "";
-        }
-        ELEMENTS.sendButton.disabled = false;
-        ELEMENTS.sendButton.classList.remove("hidden");
-        ELEMENTS.stopButton.classList.add("hidden");
-    }
+class Message(BaseModel):
+    role: str
+    parts: List[MessagePart]
 
-    function createMessageBubble(role, content, conversationId = null) {
-        const bubble = document.createElement("div");
-        bubble.classList.add("message-bubble", "flex", "gap-4", "p-4", "rounded-xl", "animate-slide-in-up", "mb-4");
-        
-        const isUser = role === "user";
-        bubble.classList.add(isUser ? "bg-bg-tertiary" : "bg-bg-secondary");
-        
-        const avatar = document.createElement("div");
-        avatar.classList.add("flex-shrink-0", "w-8", "h-8", "rounded-md", "flex", "items-center", "justify-center", isUser ? "bg-accent" : "bg-bg-tertiary", "text-white");
-        avatar.innerHTML = isUser 
-            ? `<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"></path></svg>`
-            : `<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"></path></svg>`;
-        
-        const contentContainer = document.createElement("div");
-        contentContainer.classList.add("message-content", "prose", "w-full", "max-w-none", "overflow-hidden");
-        contentContainer.innerHTML = marked.parse(content);
+class WebSocketRequest(BaseModel):
+    type: str
+    conversation_id: str | None = None
+    model: str | None = None
+    message: Message | None = None
 
-        bubble.appendChild(avatar);
-        bubble.appendChild(contentContainer);
-        ELEMENTS.chatHistory.appendChild(bubble);
-        return bubble;
-    }
+# --- 6. Core AI and Database Logic ---
 
-    function scrollToBottom() {
-        ELEMENTS.chatHistory.scrollTop = ELEMENTS.chatHistory.scrollHeight;
-    }
-
-    async function fetchConversations() {
-        try {
-            const response = await fetch(API_URLS.conversations);
-            const data = await response.json();
-            ELEMENTS.conversationList.innerHTML = '';
-            data.conversations.forEach(convo => {
-                const item = document.createElement('a');
-                item.href = "#";
-                item.classList.add('sidebar-item', 'flex', 'items-center', 'py-2', 'px-4', 'truncate');
-                item.dataset.id = convo.id;
-                item.textContent = convo.title;
-                item.addEventListener('click', () => loadConversation(convo.id));
-                ELEMENTS.conversationList.appendChild(item);
-            });
-        } catch (error) {
-            console.error("Error fetching conversations:", error);
-        }
-    }
-
-    async function loadConversation(id) {
-        currentConversationId = id;
-        ELEMENTS.welcomeScreen.classList.add('hidden');
-        ELEMENTS.chatHistory.innerHTML = '';
-        
-        const selectedItem = document.querySelector(`.sidebar-item[data-id="${id}"]`);
-        if (selectedItem) {
-            document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
-            selectedItem.classList.add('active');
-            ELEMENTS.chatTitle.textContent = selectedItem.textContent;
-        } else {
-            ELEMENTS.chatTitle.textContent = "مکالمه جدید";
-        }
-        
-        try {
-            const response = await fetch(API_URLS.messages(id));
-            if (!response.ok) {
-                if (response.status === 404) {
-                    console.warn("Conversation not found, starting new.");
-                    return newChat();
-                }
-                throw new Error("Failed to load conversation messages.");
-            }
-            const data = await response.json();
-            data.messages.forEach(msg => {
-                createMessageBubble(msg.role, msg.parts[0].text);
-            });
-            scrollToBottom();
-        } catch (error) {
-            console.error("Error loading conversation:", error);
-            createMessageBubble("model", "Error loading conversation. Please try a new chat.");
-        }
-    }
-
-    function newChat() {
-        currentConversationId = null;
-        ELEMENTS.chatHistory.innerHTML = '';
-        ELEMENTS.welcomeScreen.classList.remove('hidden');
-        ELEMENTS.chatTitle.textContent = "مکالمه جدید";
-        document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
-        ELEMENTS.chatInput.focus();
-    }
-
-    function connectWebSocket() {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            return;
-        }
-        
-        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        ws = new WebSocket(`${wsProtocol}//${window.location.host}/api/ws/chat`);
-        
-        ws.onopen = () => {
-            console.log("WebSocket connected.");
-        };
-
-        ws.onmessage = (event) => {
-            if (isTyping === false) {
-                isTyping = true;
-                lastMessageElement = createMessageBubble("model", "");
-                scrollToBottom();
-            }
-            
-            try {
-                const message = JSON.parse(event.data);
-                if (message.type === "info" && message.conversation_id) {
-                    currentConversationId = message.conversation_id;
-                    const newChatTitle = "مکالمه جدید";
-                    const item = document.createElement('a');
-                    item.href = "#";
-                    item.classList.add('sidebar-item', 'flex', 'items-center', 'py-2', 'px-4', 'truncate', 'active');
-                    item.dataset.id = currentConversationId;
-                    item.textContent = newChatTitle;
-                    item.addEventListener('click', () => loadConversation(currentConversationId));
-                    document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
-                    ELEMENTS.conversationList.prepend(item);
-                    ELEMENTS.chatTitle.textContent = newChatTitle;
-                } else if (message.type === "status") {
-                    console.log("Server status:", message.message);
-                } else {
-                    hideLoadingIndicator();
-                    lastMessageElement.querySelector(".message-content").innerHTML += marked.parse(event.data);
-                    hljs.highlightAll();
-                    scrollToBottom();
-                }
-            } catch (e) {
-                hideLoadingIndicator();
-                lastMessageElement.querySelector(".message-content").innerHTML += marked.parse(event.data);
-                hljs.highlightAll();
-                scrollToBottom();
-            }
-        };
-
-        ws.onclose = () => {
-            console.log("WebSocket disconnected. Reconnecting in 5 seconds...");
-            hideLoadingIndicator();
-            setTimeout(connectWebSocket, 5000);
-        };
-        
-        ws.onerror = (error) => {
-            console.error("WebSocket error:", error);
-            ws.close();
-        };
-    }
-
-    function sendMessage(message) {
-        if (!message.trim()) return;
-        
-        showLoadingIndicator();
-        ELEMENTS.chatInput.value = '';
-        ELEMENTS.welcomeScreen.classList.add('hidden');
-        createMessageBubble("user", message);
-        scrollToBottom();
-        
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            const payload = {
-                type: "chat",
-                conversation_id: currentConversationId,
-                model: ELEMENTS.modelSelect.value,
-                message: {
-                    role: "user",
-                    parts: [{ text: message }]
-                }
-            };
-            ws.send(JSON.stringify(payload));
-        } else {
-            console.error("WebSocket is not connected.");
-            hideLoadingIndicator();
-            createMessageBubble("model", "Error: Connection lost. Please refresh the page.");
-        }
-    }
-
-    function stopGeneration() {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "stop" }));
-        }
-        hideLoadingIndicator();
-    }
-
-    async function fetchAndPopulateModels() {
-        try {
-            const response = await fetch(API_URLS.models);
-            const data = await response.json();
-            const models = data.models;
-            ELEMENTS.modelSelect.innerHTML = '';
-            for (const key in models) {
-                const option = document.createElement('option');
-                option.value = key;
-                option.textContent = models[key].name;
-                option.title = models[key].description;
-                ELEMENTS.modelSelect.appendChild(option);
-            }
-        } catch (error) {
-            console.error("Error fetching models:", error);
-        }
-    }
-
-    function setupEventListeners() {
-        ELEMENTS.chatForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            sendMessage(ELEMENTS.chatInput.value);
-        });
-        
-        ELEMENTS.chatInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage(ELEMENTS.chatInput.value);
-            }
-        });
-
-        ELEMENTS.stopButton.addEventListener('click', stopGeneration);
-        ELEMENTS.newChatBtn.addEventListener('click', newChat);
-
-        ELEMENTS.menuBtn.addEventListener('click', () => {
-            ELEMENTS.sidebar.classList.toggle('-translate-x-full');
-        });
-    }
-
-    function init() {
-        setupEventListeners();
-        fetchAndPopulateModels();
-        fetchConversations();
-        connectWebSocket();
-    }
+# --- بهبود: بازنویسی کامل تابع استریم برای پایداری بیشتر ---
+async def gemini_chat_stream(messages: List[Dict], model: str, stop_event: asyncio.Event) -> AsyncGenerator[Dict[str, Any], None]:
+    headers = {"Content-Type": "application/json"}
+    payload = {"contents": messages}
+    url = f"{GEMINI_API_BASE_URL}/{model}:streamGenerateContent?key={GEMINI_API_KEY}"
     
-    init();
+    timeout = httpx.Timeout(120.0, connect=10.0) # Increased timeout
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        try:
+            async with client.stream("POST", url, json=payload, headers=headers) as response:
+                response.raise_for_status()
+                buffer = ""
+                async for raw_chunk in response.aiter_bytes():
+                    if stop_event.is_set():
+                        logger.info("Stop event received, breaking stream.")
+                        break
+                    
+                    buffer += raw_chunk.decode('utf-8', errors='ignore')
 
-});
-</script>
+                    # The stream sends JSON objects separated by commas, enclosed in [].
+                    # We process complete JSON objects from the buffer.
+                    if buffer.startswith('['): buffer = buffer[1:]
+                    if buffer.endswith(']'): buffer = buffer[:-1]
 
-</body>
-</html>
+                    parts = buffer.split('},')
+                    for i, part in enumerate(parts):
+                        if i < len(parts) -1:
+                            part += '}'
+                        
+                        try:
+                            data = json.loads(part)
+                            text_content = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                            if text_content:
+                                yield {"type": "chunk", "content": text_content}
+                            buffer = ""
+                        except json.JSONDecodeError:
+                            buffer = part # Incomplete JSON, wait for next chunk
+                            continue
+        
+        except httpx.HTTPStatusError as e:
+            error_body = await e.response.aread()
+            logger.error(f"HTTP error during stream: {e.response.status_code} - {error_body.decode()}", exc_info=True)
+            yield {"type": "error", "content": f"HTTP error: {e.response.status_code}"}
+        except Exception as e:
+            logger.error(f"An unexpected error occurred in gemini_chat_stream: {e}", exc_info=True)
+            yield {"type": "error", "content": f"Unexpected error: {str(e)}"}
+
+
+async def generate_title_for_conversation(user_id: str, conversation_id: str, first_message: str, websocket: WebSocket):
+    if not db: return
+    
+    prompt = f"Create a very short, concise title (4 words max, in Persian) for a conversation starting with: '{first_message}'. Respond ONLY with the title itself, no extra text."
+    prompt_messages = [{"role": "user", "parts": [{"text": prompt}]}]
+    
+    try:
+        title = ""
+        # Using a fast model for title generation
+        async for result in gemini_chat_stream(prompt_messages, "gemini-1.5-flash-latest", asyncio.Event()):
+            if result["type"] == "chunk":
+                title += result["content"]
+
+        if title:
+            clean_title = title.strip().replace("\"", "").replace("*", "")
+            doc_ref = db.collection(USERS_COLLECTION).document(user_id).collection(CONVERSATIONS_COLLECTION).document(conversation_id)
+            await doc_ref.update({"title": clean_title})
+            logger.info(f"Generated and saved title '{clean_title}' for conversation {conversation_id}")
+            # --- بهبود: ارسال پیام آپدیت عنوان به فرانت‌اند ---
+            await websocket.send_json({"type": "title_update", "conversation_id": conversation_id, "title": clean_title})
+    except Exception as e:
+        logger.error(f"Error generating or saving title: {e}", exc_info=True)
+
+
+# --- بهبود: تغییر ساختار ذخیره پیام‌ها به Subcollection برای مقیاس‌پذیری ---
+async def get_messages_from_db(conversation_id: str) -> List[Dict]:
+    if not db: return []
+    try:
+        messages_ref = db.collection(USERS_COLLECTION).document(USER_ID).collection(CONVERSATIONS_COLLECTION).document(conversation_id).collection(MESSAGES_COLLECTION)
+        docs = messages_ref.order_by("timestamp").stream()
+        return [doc.to_dict() async for doc in docs]
+    except Exception as e:
+        logger.error(f"Error fetching messages for {conversation_id}: {e}", exc_info=True)
+        return []
+
+async def get_conversations_from_db() -> List[Dict]:
+    if not db: return []
+    try:
+        conversations_ref = db.collection(USERS_COLLECTION).document(USER_ID).collection(CONVERSATIONS_COLLECTION)
+        docs = conversations_ref.order_by("created_at", direction=firestore.Query.DESCENDING).limit(50).stream()
+        conversations = []
+        async for doc in docs:
+            data = doc.to_dict()
+            conversations.append({"id": doc.id, "title": data.get("title", "مکالمه جدید...")})
+        return conversations
+    except Exception as e:
+        logger.error(f"Error fetching conversations: {e}", exc_info=True)
+        return []
+
+# --- 7. API Endpoints ---
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/api/models")
+async def get_models():
+    return JSONResponse(content={"models": MODELS})
+
+@app.get("/api/conversations")
+async def get_conversations():
+    conversations = await get_conversations_from_db()
+    return JSONResponse(content={"conversations": conversations})
+
+@app.get("/api/conversations/{conversation_id}")
+async def get_conversation_details(conversation_id: str):
+    messages = await get_messages_from_db(conversation_id)
+    if not messages and db:
+        # Check if conversation document exists but has no messages yet
+        convo_doc = await db.collection(USERS_COLLECTION).document(USER_ID).collection(CONVERSATIONS_COLLECTION).document(conversation_id).get()
+        if not convo_doc.exists:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    return JSONResponse(content={"messages": messages})
+
+# --- 8. WebSocket Main Handler ---
+# --- بهبود: بازنویسی کامل WebSocket Handler برای مدیریت بهتر state و خطاها ---
+@app.websocket("/api/ws/chat")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    stop_event = asyncio.Event()
+    generation_task = None
+    
+    async def chat_generator_task(request_data: WebSocketRequest):
+        stop_event.clear()
+        
+        conversation_id = request_data.conversation_id
+        is_new_conversation = False
+        if not conversation_id:
+            is_new_conversation = True
+            conversation_id = str(uuid.uuid4())
+            await websocket.send_json({"type": "info", "conversation_id": conversation_id})
+
+        user_message_dict = request_data.message.dict()
+        user_message_dict["timestamp"] = firestore.SERVER_TIMESTAMP
+
+        if db:
+            convo_ref = db.collection(USERS_COLLECTION).document(USER_ID).collection(CONVERSATIONS_COLLECTION).document(conversation_id)
+            if is_new_conversation:
+                await convo_ref.set({"created_at": firestore.SERVER_TIMESTAMP, "title": "مکالمه جدید..."})
+            
+            msg_ref = convo_ref.collection(MESSAGES_COLLECTION)
+            await msg_ref.add(user_message_dict)
+
+        history = await get_messages_from_db(conversation_id)
+        
+        full_assistant_message = ""
+        try:
+            async for result in gemini_chat_stream(history, request_data.model, stop_event):
+                if result["type"] == "chunk":
+                    await websocket.send_text(result["content"])
+                    full_assistant_message += result["content"]
+                elif result["type"] == "error":
+                    await websocket.send_json({"type": "error", "message": result["content"]})
+                    full_assistant_message = "" # Prevent saving error message
+                    break
+        finally:
+            if full_assistant_message:
+                assistant_message_dict = {
+                    "role": "model",
+                    "parts": [{"text": full_assistant_message}],
+                    "timestamp": firestore.SERVER_TIMESTAMP
+                }
+                if db:
+                    await msg_ref.add(assistant_message_dict)
+            
+            await websocket.send_json({"type": "stream_end"})
+
+            # Generate title in background only for the first user message
+            if is_new_conversation and db:
+                asyncio.create_task(generate_title_for_conversation(USER_ID, conversation_id, user_message_dict["parts"][0]["text"], websocket))
+
+    try:
+        while True:
+            raw_data = await websocket.receive_text()
+            data = json.loads(raw_data)
+            request = WebSocketRequest(**data)
+
+            if request.type == "stop":
+                logger.info(f"Stop request received for client {websocket.client}")
+                stop_event.set()
+                if generation_task:
+                    generation_task.cancel()
+                    generation_task = None
+                continue
+            
+            if request.type == "chat":
+                if generation_task and not generation_task.done():
+                    logger.warning("Client sent new message while previous one was generating. Cancelling old task.")
+                    stop_event.set()
+                    generation_task.cancel()
+                
+                generation_task = asyncio.create_task(chat_generator_task(request))
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected: {websocket.client}")
+        stop_event.set()
+        if generation_task:
+            generation_task.cancel()
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}", exc_info=True)
+        await websocket.close(code=1011, reason=f"An error occurred: {e}")
