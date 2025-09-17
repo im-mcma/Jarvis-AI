@@ -3,11 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jarvis v8.2 - Elite</title>
+    <title>Jarvis Elite - AI Chat</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script> <!-- Add specific languages as needed -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700&display=swap" rel="stylesheet">
@@ -23,8 +27,9 @@
             --text-secondary: #8B949E;
             --accent: #58A6FF;
             --accent-hover: #79C0FF;
-            --code-bg: #010409;
+            --code-bg: #010409; /* Slightly darker than GitHub dark theme */
             --danger: #F85149;
+            --warning: #FEE75C; /* A warm yellow for warnings */
         }
 
         body {
@@ -51,7 +56,7 @@
         /* Markdown and Code Block Styling */
         .prose {
             color: var(--text-primary);
-            max-width: 100% !important;
+            max-width: 100% !important; /* Override Tailwind's default max-width for prose */
         }
         .prose pre {
             background-color: var(--code-bg) !important;
@@ -60,10 +65,21 @@
             border: 1px solid var(--border-color);
             font-size: 0.9em;
             position: relative;
+            direction: ltr; /* Ensure code blocks display LTR */
+            text-align: left;
+            overflow-x: auto;
         }
         .prose code {
-            font-family: 'Cascadia Code', 'JetBrains Mono', monospace;
+            font-family: 'Cascadia Code', 'JetBrains Mono', monospace; /* Preferred coding font */
         }
+        .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+            color: var(--text-primary);
+        }
+        .prose p { margin-bottom: 0.5em; }
+        .prose ul, .prose ol { margin-left: 1.5em; }
+        .prose ul li, .prose ol li { margin-bottom: 0.25em; }
+        .prose strong { color: var(--accent); } /* Highlight strong text */
+
 
         /* Animations */
         @keyframes fadeIn {
@@ -83,8 +99,8 @@
             border: 1px solid var(--border-color);
             color: var(--text-primary);
             transition: border-color 0.2s, box-shadow 0.2s;
-            padding-left: 3rem;
-            padding-right: 1rem;
+            padding-left: 1rem; /* Adjust for RTL */
+            padding-right: 3rem; /* Adjust for RTL */
         }
         #chat-input:focus {
             outline: none;
@@ -100,7 +116,7 @@
         .copy-btn {
             position: absolute;
             top: 0.5rem;
-            left: 0.5rem; /* In RTL, left is correct */
+            right: 0.5rem; /* For RTL layout, button is on the right */
             background-color: var(--bg-tertiary);
             color: var(--text-secondary);
             border: 1px solid var(--border-color);
@@ -120,38 +136,131 @@
             align-items: center;
             justify-content: space-between;
             transition: background-color 0.2s ease, border-color 0.2s ease;
-            border-right: 3px solid transparent;
+            border-left: 3px solid transparent; /* In RTL, active border is on the left */
         }
         .sidebar-item:hover { background-color: var(--bg-tertiary); }
         .sidebar-item.active { background-color: var(--bg-tertiary); border-color: var(--accent); }
         .delete-btn { opacity: 0; transition: opacity 0.2s; }
         .sidebar-item:hover .delete-btn { opacity: 1; }
 
+        /* Sidebar overlay for mobile */
+        #sidebar-overlay {
+            position: fixed;
+            top: 0;
+            right: 0;
+            left: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 10;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0s linear 0.3s;
+        }
+        #sidebar-overlay.active {
+            opacity: 1;
+            visibility: visible;
+            transition: opacity 0.3s ease, visibility 0s linear 0s;
+        }
+
         /* Toast Notification System */
         #toast-container {
             position: fixed;
             bottom: 1.5rem;
-            left: 1.5rem;
+            right: 1.5rem; /* Position to the right for RTL */
             z-index: 100;
         }
         .toast {
             padding: 1rem 1.5rem;
-            background-color: var(--danger);
             color: white;
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
             animation: fadeIn 0.3s ease;
             opacity: 1;
             transition: opacity 0.3s ease;
+            margin-bottom: 0.75rem; /* Space between toasts */
         }
+        .toast.error { background-color: var(--danger); }
+        .toast.warning { background-color: var(--warning); color: #333; }
+        .toast.info { background-color: var(--accent); }
+
+        /* Chat bubble specifics */
+        .message-content {
+            border-radius: 8px;
+            border-top-right-radius: 0; /* Remove top-right corner radius */
+            direction: rtl; /* Ensure message content flows correctly */
+        }
+        .message-user .message-content {
+            background-color: var(--accent); /* Different color for user messages */
+            color: white;
+            border-top-left-radius: 0; /* Remove top-left corner radius for user messages */
+            border-top-right-radius: 8px; /* Set top-right corner radius for user messages */
+            padding-right: 1.25rem; /* For user messages */
+            padding-left: 1rem;
+        }
+
+        .message-model .message-content {
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+            border-top-right-radius: 0; /* Original model styling */
+            border-top-left-radius: 8px; /* Maintain normal radius for model messages */
+        }
+
+        /* Adjust avatars for RTL */
+        .message-user .avatar-container {
+            margin-left: 1rem; /* Space after user avatar */
+        }
+        .message-model .avatar-container {
+            margin-left: 1rem; /* Space after model avatar */
+        }
+        .message-user .message-body {
+            margin-left: auto; /* Push user message to the right */
+            margin-right: 1rem;
+        }
+        .message-model .message-body {
+            margin-right: 1rem;
+        }
+        
+        /* Modal dialog */
+        dialog {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            padding: 1.5rem;
+            max-width: 500px;
+            color: var(--text-primary);
+        }
+        dialog::backdrop {
+            background-color: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(2px);
+        }
+
+        .chat-input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        .input-buttons {
+            position: absolute;
+            left: 0.75rem; /* On the left side in RTL */
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            gap: 0.5rem;
+        }
+
     </style>
 </head>
 <body class="flex h-screen overflow-hidden text-sm">
 
+    <!-- Sidebar Overlay for Mobile -->
+    <div id="sidebar-overlay" class="md:hidden" onclick="toggleSidebar()"></div>
+
     <aside id="sidebar" class="w-72 bg-bg-secondary border-l border-border-color flex-shrink-0 flex flex-col transition-all duration-300 md:relative md:translate-x-0 -translate-x-full fixed h-full z-20">
         <div class="p-4 border-b border-border-color flex items-center justify-between">
             <h1 class="text-lg font-bold">Jarvis Elite</h1>
-            <button id="new-chat-btn" title="چت جدید" class="p-2 rounded-lg hover:bg-bg-tertiary transition-colors">
+            <button id="new-chat-btn" title="شروع مکالمه جدید" class="p-2 rounded-lg hover:bg-bg-tertiary transition-colors">
+                <!-- Heroicon: Plus -->
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
             </button>
         </div>
@@ -161,41 +270,58 @@
     <main class="flex-1 flex flex-col bg-bg-primary">
         <header class="flex-shrink-0 p-3 border-b border-border-color flex items-center justify-between gap-4">
             <div class="flex items-center gap-2">
-                <button id="menu-btn" class="md:hidden p-2 rounded-lg hover:bg-bg-tertiary">
+                <button id="menu-btn" title="باز کردن/بستن نوار کناری" class="md:hidden p-2 rounded-lg hover:bg-bg-tertiary">
+                    <!-- Heroicon: Menu -->
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
                 </button>
                 <h2 id="chat-title" class="font-bold text-base text-text-primary truncate">مکالمه جدید</h2>
+                <button id="edit-title-btn" title="ویرایش عنوان مکالمه" class="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-bg-tertiary transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                    <!-- Heroicon: Pencil -->
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zm-6.071 7.171L4 16h3.947l5.657-5.657-2.828-2.828-5.657 5.657z"></path></svg>
+                </button>
             </div>
-            <select id="model-select" class="bg-bg-secondary border border-border-color rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent"></select>
+            <select id="model-select" title="انتخاب مدل هوش مصنوعی" class="bg-bg-secondary border border-border-color rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent"></select>
         </header>
 
-        <div id="chat-history" class="flex-1 p-6 overflow-y-auto">
-            <div id="welcome-screen" class="h-full flex flex-col items-center justify-center text-center animate-fade-in">
-                <h2 class="text-2xl font-bold mt-4">Jarvis Elite</h2>
-                <p class="text-text-secondary mt-2">چگونه می‌توانم امروز به شما کمک کنم؟</p>
-                <div class="grid grid-cols-2 gap-3 mt-8 w-full max-w-md">
-                    <div class="bg-bg-secondary p-3 rounded-lg text-right cursor-pointer hover:bg-bg-tertiary transition-colors" onclick="setExamplePrompt('یک برنامه پایتون برای پیش‌بینی آب و هوا بنویس.')">
-                        <p class="font-bold text-sm">نوشتن کد پایتون</p>
-                        <p class="text-xs text-text-secondary">برای پیش‌بینی آب و هوا</p>
+        <div id="chat-history" class="flex-1 p-6 overflow-y-auto custom-scroll">
+            <div id="welcome-screen" class="h-full flex flex-col items-center justify-center text-center animate-fade-in px-4">
+                <h2 class="text-3xl font-bold mt-4 text-gradient-accent">Jarvis Elite v8.2</h2>
+                <p class="text-text-secondary mt-3 text-lg">چگونه می‌توانم امروز به شما کمک کنم؟</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-10 w-full max-w-xl">
+                    <div class="bg-bg-secondary p-4 rounded-lg text-right cursor-pointer hover:bg-bg-tertiary transition-colors shadow-sm" onclick="setExamplePrompt('یک برنامه پایتون برای پیش‌بینی آب و هوا بنویسید.')">
+                        <p class="font-bold text-base text-primary">نوشتن کد پایتون</p>
+                        <p class="text-xs text-text-secondary mt-1">برای پیش‌بینی آب و هوا (نمونه).</p>
                     </div>
-                    <div class="bg-bg-secondary p-3 rounded-lg text-right cursor-pointer hover:bg-bg-tertiary transition-colors" onclick="setExamplePrompt('چند ایده برای یک استارت‌آپ در حوزه هوش مصنوعی بده.')">
-                        <p class="font-bold text-sm">ایده برای استارت‌آپ</p>
-                        <p class="text-xs text-text-secondary">در حوزه هوش مصنوعی</p>
+                    <div class="bg-bg-secondary p-4 rounded-lg text-right cursor-pointer hover:bg-bg-tertiary transition-colors shadow-sm" onclick="setExamplePrompt('چند ایده برای یک استارت‌آپ در حوزه هوش مصنوعی (AI) بدهید.')">
+                        <p class="font-bold text-base">ایده برای استارت‌آپ</p>
+                        <p class="text-xs text-text-secondary mt-1">در حوزه هوش مصنوعی و فناوری‌های جدید.</p>
+                    </div>
+                    <div class="bg-bg-secondary p-4 rounded-lg text-right cursor-pointer hover:bg-bg-tertiary transition-colors shadow-sm" onclick="setExamplePrompt('تفاوت بین یادگیری ماشین (Machine Learning) و یادگیری عمیق (Deep Learning) چیست؟')">
+                        <p class="font-bold text-base">مفاهیم ML و DL</p>
+                        <p class="text-xs text-text-secondary mt-1">توضیح تفاوت‌ها و کاربردها.</p>
+                    </div>
+                    <div class="bg-bg-secondary p-4 rounded-lg text-right cursor-pointer hover:bg-bg-tertiary transition-colors shadow-sm" onclick="setExamplePrompt('یک متن بازاریابی جذاب برای یک اپلیکیشن مدیریت زمان بنویسید.')">
+                        <p class="font-bold text-base">نوشتن متن بازاریابی</p>
+                        <p class="text-xs text-text-secondary mt-1">برای محصول یا خدمات شما.</p>
                     </div>
                 </div>
             </div>
         </div>
 
         <footer class="p-4 flex-shrink-0">
-            <div class="relative max-w-4xl mx-auto">
-                <form id="chat-form">
-                    <textarea id="chat-input" placeholder="پیام خود را اینجا بنویسید... (Shift+Enter برای خط جدید)" rows="1" class="w-full rounded-lg py-3 resize-none overflow-y-hidden"></textarea>
-                    <button type="submit" id="send-button" title="ارسال پیام" class="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-md btn btn-primary">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
-                    </button>
-                    <button type="button" id="stop-button" title="توقف" class="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-md btn bg-red-600 hover:bg-red-700 text-white hidden">
-                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"></path></svg>
-                    </button>
+            <div class="relative max-w-4xl mx-auto chat-input-wrapper">
+                <form id="chat-form" class="w-full">
+                    <textarea id="chat-input" placeholder="پیام خود را اینجا بنویسید... (Shift+Enter برای خط جدید)" rows="1" class="w-full rounded-lg py-3 pr-12 pl-4 resize-none overflow-y-hidden"></textarea>
+                    <div class="input-buttons">
+                        <button type="submit" id="send-button" title="ارسال پیام" class="w-8 h-8 flex items-center justify-center rounded-md btn btn-primary">
+                            <!-- Heroicon: Paper Airplane -->
+                            <svg class="w-5 h-5 -rotate-90 rtl:rotate-90" fill="currentColor" viewBox="0 0 20 20"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.93.996l5 1.429a1 1 0 001.169-1.409l-7-14z"></path></svg>
+                        </button>
+                        <button type="button" id="stop-button" title="توقف" class="w-8 h-8 flex items-center justify-center rounded-md btn bg-red-600 hover:bg-red-700 text-white hidden">
+                            <!-- Heroicon: Stop -->
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"></path></svg>
+                        </button>
+                    </div>
                 </form>
             </div>
         </footer>
@@ -203,15 +329,30 @@
 
     <div id="toast-container"></div>
 
+    <!-- Edit Conversation Title Modal -->
+    <dialog id="edit-title-modal" class="rounded-xl p-6 shadow-lg backdrop:bg-black backdrop:bg-opacity-50">
+        <h3 class="text-xl font-bold mb-4">ویرایش عنوان مکالمه</h3>
+        <p class="text-text-secondary mb-4">یک عنوان جدید و مرتبط برای این مکالمه وارد کنید.</p>
+        <input type="text" id="new-title-input" class="w-full p-2.5 rounded-lg bg-bg-tertiary border border-border-color focus:outline-none focus:ring-2 focus:ring-accent text-text-primary mb-4" placeholder="عنوان جدید..." maxlength="70">
+        <div class="flex justify-end gap-3">
+            <button type="button" class="px-5 py-2.5 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors" onclick="ELEMENTS.editTitleModal.close()">انصراف</button>
+            <button type="button" id="save-new-title-btn" class="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors">ذخیره</button>
+        </div>
+    </dialog>
+
+
     <script>
         document.addEventListener('DOMContentLoaded', () => {
 
+            // Global elements object
             const ELEMENTS = {
                 sidebar: document.getElementById('sidebar'),
+                sidebarOverlay: document.getElementById('sidebar-overlay'),
                 menuBtn: document.getElementById('menu-btn'),
                 newChatBtn: document.getElementById('new-chat-btn'),
                 conversationList: document.getElementById('conversation-list'),
                 chatTitle: document.getElementById('chat-title'),
+                editTitleBtn: document.getElementById('edit-title-btn'),
                 modelSelect: document.getElementById('model-select'),
                 chatHistory: document.getElementById('chat-history'),
                 welcomeScreen: document.getElementById('welcome-screen'),
@@ -219,25 +360,41 @@
                 chatInput: document.getElementById('chat-input'),
                 sendButton: document.getElementById('send-button'),
                 stopButton: document.getElementById('stop-button'),
-                toastContainer: document.getElementById('toast-container')
+                toastContainer: document.getElementById('toast-container'),
+                editTitleModal: document.getElementById('edit-title-modal'),
+                newTitleInput: document.getElementById('new-title-input'),
+                saveNewTitleBtn: document.getElementById('save-new-title-btn')
             };
 
             let ws = null;
             let currentConversationId = null;
             let isGenerating = false;
-            let lastMessageElement = null;
-            let streamContentBuffer = "";
+            let lastMessageElement = null; // Reference to the last model message div
+            let streamContentBuffer = ""; // Buffer for incoming stream content
 
             const API_URLS = {
                 models: "/api/models",
                 conversations: "/api/conversations",
-                messages: (id) => `/api/conversations/${id}`
+                messages: (id) => `/api/conversations/${id}/messages`,
+                deleteConversation: (id) => `/api/conversations/${id}`,
+                updateConversationTitle: (id) => `/api/conversations/${id}/title`
             };
 
-            // تابع نمایش اعلان (Toast)
-            function showToast(message, duration = 4000) {
+            // Configure Marked.js for GitHub Flavored Markdown and highlight.js integration
+            marked.setOptions({
+                gfm: true, // Use GitHub Flavored Markdown
+                breaks: true, // Render `\n` as `<br>`
+                highlight: function(code, lang) {
+                    const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+                    return hljs.highlight(code, { language }).value;
+                },
+                langPrefix: 'hljs language-', // highlight.js css expects this
+            });
+
+            // Toast Notification System
+            function showToast(message, type = 'info', duration = 4000) {
                 const toast = document.createElement('div');
-                toast.className = 'toast';
+                toast.className = `toast animate-fade-in ${type}`;
                 toast.textContent = message;
                 ELEMENTS.toastContainer.appendChild(toast);
                 setTimeout(() => {
@@ -246,34 +403,36 @@
                 }, duration);
             }
             
-            // ایجاد حباب پیام
+            // Create a message bubble (user or model)
             function createMessageBubble(role, content = "") {
                 const isUser = role === "user";
                 const bubble = document.createElement("div");
-                bubble.className = "flex animate-slide-in-up mb-5";
+                bubble.className = `flex mb-5 animate-slide-in-up message-${role}`;
 
                 const avatarIcon = isUser ?
                     `<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"></path></svg>` :
-                    `<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M9.4 3.44C10.12 3.15 10.91 3 11.75 3c2.76 0 5 2.24 5 5s-2.24 5-5 5c-.84 0-1.63-.15-2.35-.44l-3.21 3.21c-.47.47-1.23.47-1.7 0l-1.41-1.41c-.47-.47-.47-1.23 0-1.7l3.21-3.21zM11.75 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3z"></path></svg>`;
+                    `<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"></path></svg>`;
+                    // Alternative AI icon: `<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M9.4 3.44C10.12 3.15 10.91 3 11.75 3c2.76 0 5 2.24 5 5s-2.24 5-5 5c-.84 0-1.63-.15-2.35-.44l-3.21 3.21c-.47.47-1.23.47-1.7 0l-1.41-1.41c-.47-.47-.47-1.23 0-1.7l3.21-3.21zM11.75 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3z"></path></svg>`;
+
 
                 bubble.innerHTML = `
-                    <div class="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${isUser ? 'bg-accent text-white' : 'bg-bg-tertiary'}">
+                    <div class="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center avatar-container ${isUser ? 'bg-accent text-white' : 'bg-bg-tertiary text-text-secondary'}">
                         ${avatarIcon}
                     </div>
-                    <div class="mr-4 w-full overflow-hidden">
+                    <div class="w-full flex flex-col message-body">
                         <p class="font-bold text-sm mb-1">${isUser ? 'شما' : 'Jarvis'}</p>
-                        <div class="message-content prose prose-invert bg-bg-secondary p-4 rounded-lg rounded-tr-none">
+                        <div class="message-content prose prose-invert bg-bg-secondary p-4 rounded-lg relative">
                             ${content ? marked.parse(content) : ''}
                         </div>
                     </div>
                 `;
 
-                if (content === "") { // نمایش نشانگر "در حال نوشتن"
+                if (content === "") { // Display typing indicator for model messages
                     bubble.querySelector('.message-content').innerHTML = `
-                        <div class="flex items-center space-x-2 rtl:space-x-reverse">
-                            <div class="w-2 h-2 bg-text-secondary rounded-full animate-pulse"></div>
-                            <div class="w-2 h-2 bg-text-secondary rounded-full animate-pulse" style="animation-delay: 0.2s;"></div>
-                            <div class="w-2 h-2 bg-text-secondary rounded-full animate-pulse" style="animation-delay: 0.4s;"></div>
+                        <div class="flex items-center space-x-2 rtl:space-x-reverse justify-end">
+                            <div class="w-2.5 h-2.5 bg-text-secondary rounded-full animate-pulse"></div>
+                            <div class="w-2.5 h-2.5 bg-text-secondary rounded-full animate-pulse" style="animation-delay: 0.2s;"></div>
+                            <div class="w-2.5 h-2.5 bg-text-secondary rounded-full animate-pulse" style="animation-delay: 0.4s;"></div>
                         </div>`;
                 }
 
@@ -282,68 +441,88 @@
                 return bubble;
             }
 
-            // به‌روزرسانی بلاک‌های کد
+            // Apply syntax highlighting and add copy buttons to code blocks
             function updateCodeBlocks() {
-                document.querySelectorAll('pre code').forEach((block) => {
-                    if (block.closest('pre').querySelector('.copy-btn')) return;
+                document.querySelectorAll('.message-content pre code').forEach((block) => {
+                    // Prevent re-highlighting or adding multiple copy buttons
+                    if (block.classList.contains('hljs-done') || block.closest('pre').querySelector('.copy-btn')) {
+                        return;
+                    }
                     
                     const pre = block.closest('pre');
-                    hljs.highlightElement(block);
                     
+                    // Highlight the code block
+                    hljs.highlightElement(block);
+                    block.classList.add('hljs-done'); // Mark as done
+
+                    // Create and append copy button
                     const copyButton = document.createElement('button');
                     copyButton.className = 'copy-btn';
-                    copyButton.innerText = 'کپی';
+                    copyButton.innerHTML = `
+                        <svg class="w-3.5 h-3.5 inline-block -mt-0.5 ml-1" fill="currentColor" viewBox="0 0 20 20"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z"></path><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z"></path></svg>
+                        <span>کپی</span>`;
                     copyButton.onclick = () => {
                         navigator.clipboard.writeText(block.innerText).then(() => {
-                            copyButton.innerText = 'کپی شد!';
-                            setTimeout(() => { copyButton.innerText = 'کپی'; }, 2000);
+                            copyButton.querySelector('span').innerText = 'کپی شد!';
+                            setTimeout(() => { copyButton.querySelector('span').innerText = 'کپی'; }, 2000);
+                        }).catch(err => {
+                            console.error('Failed to copy text: ', err);
+                            showToast('خطا در کپی متن.', 'error');
                         });
                     };
                     pre.appendChild(copyButton);
                 });
             }
 
-            // اسکرول به پایین
+            // Scroll chat history to bottom
             function scrollToBottom() {
                 ELEMENTS.chatHistory.scrollTop = ELEMENTS.chatHistory.scrollHeight;
             }
 
-            // دریافت مکالمات از سرور
+            // Fetch conversations from backend
             async function fetchConversations() {
                 try {
                     const response = await fetch(API_URLS.conversations);
+                    if (!response.ok) throw new Error("Failed to fetch conversations.");
                     const data = await response.json();
-                    ELEMENTS.conversationList.innerHTML = '';
-                    data.conversations.forEach(convo => addConversationToList(convo.id, convo.title));
+                    ELEMENTS.conversationList.innerHTML = ''; // Clear existing list
+                    if (data.conversations && data.conversations.length > 0) {
+                        data.conversations.forEach(convo => addConversationToList(convo.id, convo.title, convo.created_at));
+                        // Automatically load the latest conversation
+                        loadConversation(data.conversations[0].id);
+                    } else {
+                        newChat(); // If no conversations, start a new blank one
+                    }
                 } catch (error) {
-                    console.error("خطا در دریافت مکالمات:", error);
-                    showToast("خطا در بارگذاری مکالمات.");
+                    console.error("Error fetching conversations:", error);
+                    showToast("خطا در بارگذاری مکالمات.", 'error');
+                    newChat(); // Ensure a clean slate even on error
                 }
             }
 
-            // حذف مکالمه
+            // Delete a conversation
             async function deleteConversation(id, element) {
-                if (!confirm("آیا از حذف این مکالمه مطمئن هستید؟")) return;
+                if (!confirm("آیا از حذف این مکالمه مطمئن هستید؟ این عمل قابل برگشت نیست.")) return;
 
                 try {
-                    const response = await fetch(API_URLS.messages(id), { method: 'DELETE' });
-                    if (!response.ok) throw new Error('Failed to delete.');
+                    const response = await fetch(API_URLS.deleteConversation(id), { method: 'DELETE' });
+                    if (!response.ok) throw new Error('Failed to delete conversation.');
                     
                     element.remove();
                     if (currentConversationId === id) {
                         newChat();
                     }
-                    showToast("مکالمه با موفقیت حذف شد.", 2000);
+                    showToast("مکالمه با موفقیت حذف شد.", 'info', 2000);
                 } catch (error) {
                     console.error("Error deleting conversation:", error);
-                    showToast("خطا در حذف مکالمه.");
+                    showToast("خطا در حذف مکالمه.", 'error');
                 }
             }
             
-            // اضافه کردن مکالمه به لیست نوار کناری
-            function addConversationToList(id, title) {
+            // Add a conversation to the sidebar list
+            function addConversationToList(id, title, createdAt) {
                 const item = document.createElement('div');
-                item.className = 'sidebar-item group py-2.5 px-4 cursor-pointer';
+                item.className = 'sidebar-item group py-2.5 px-4 cursor-pointer text-sm';
                 item.dataset.id = id;
 
                 const titleSpan = document.createElement('span');
@@ -351,60 +530,83 @@
                 titleSpan.textContent = title;
                 
                 const deleteBtn = document.createElement('button');
-                deleteBtn.className = 'delete-btn p-1 rounded-md hover:bg-danger hover:text-white';
-                deleteBtn.innerHTML = `<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd"></path></svg>`;
+                deleteBtn.className = 'delete-btn p-1 mr-2 rounded-md hover:bg-danger hover:text-white transition-colors';
+                deleteBtn.title = 'حذف مکالمه';
+                deleteBtn.innerHTML = `
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd"></path></svg>`;
                 
                 item.appendChild(titleSpan);
                 item.appendChild(deleteBtn);
 
                 item.addEventListener('click', (e) => {
-                    if (e.target.closest('.delete-btn')) return;
+                    if (e.target.closest('.delete-btn')) return; // Ignore click if delete button was clicked
                     loadConversation(id);
                     if (window.innerWidth < 768) {
-                        ELEMENTS.sidebar.classList.add('-translate-x-full');
+                        toggleSidebar(); // Close sidebar on mobile after selecting chat
                     }
                 });
                 deleteBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
+                    e.stopPropagation(); // Prevent loading conversation
                     deleteConversation(id, item);
                 });
                 
-                ELEMENTS.conversationList.prepend(item);
+                ELEMENTS.conversationList.prepend(item); // Add to the beginning (newest first)
                 return item;
             }
 
-            // بارگذاری مکالمه
+            // Load specific conversation messages
             async function loadConversation(id) {
+                if (isGenerating) {
+                    // Ask user if they want to stop current generation
+                    if (!confirm("یک پاسخ در حال تولید است. آیا مایل به توقف آن و بارگذاری مکالمه جدید هستید؟")) {
+                        return;
+                    }
+                    stopGeneration(true); // Stop current generation task
+                }
+
                 currentConversationId = id;
                 ELEMENTS.welcomeScreen.classList.add('hidden');
-                ELEMENTS.chatHistory.innerHTML = '';
+                ELEMENTS.chatHistory.innerHTML = '<div class="flex items-center justify-center h-full text-text-secondary"><svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-text-secondary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>در حال بارگذاری مکالمه...</div>';
                 
+                // Update active state in sidebar
                 document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
                 const selectedItem = document.querySelector(`.sidebar-item[data-id="${id}"]`);
                 if (selectedItem) {
                     selectedItem.classList.add('active');
                     ELEMENTS.chatTitle.textContent = selectedItem.querySelector('span').textContent;
+                    ELEMENTS.editTitleBtn.disabled = false;
+                } else {
+                    ELEMENTS.chatTitle.textContent = "مکالمه ناموجود";
+                    ELEMENTS.editTitleBtn.disabled = true;
                 }
                 
                 try {
                     const response = await fetch(API_URLS.messages(id));
-                    if (!response.ok) throw new Error("مکالمه یافت نشد.");
+                    if (!response.ok) throw new Error("Conversation not found.");
                     
                     const data = await response.json();
+                    ELEMENTS.chatHistory.innerHTML = ''; // Clear loading message
                     data.messages.forEach(msg => {
                         createMessageBubble(msg.role, msg.parts[0].text);
                     });
                     updateCodeBlocks();
                     scrollToBottom();
                 } catch (error) {
-                    console.error("خطا در بارگذاری مکالمه:", error);
-                    showToast("خطا در بارگذاری مکالمه.");
-                    newChat();
+                    console.error("Error loading conversation:", error);
+                    showToast("خطا در بارگذاری مکالمه. ممکن است مکالمه حذف شده باشد یا وجود نداشته باشد.", 'error');
+                    newChat(); // Go to new chat if selected convo cannot be loaded
                 }
             }
 
-            // شروع یک چت جدید
+            // Start a new blank chat
             function newChat() {
+                if (isGenerating) {
+                    if (!confirm("یک پاسخ در حال تولید است. آیا مایل به توقف آن و شروع مکالمه جدید هستید؟")) {
+                        return;
+                    }
+                    stopGeneration(true);
+                }
+
                 currentConversationId = null;
                 ELEMENTS.chatHistory.innerHTML = '';
                 ELEMENTS.welcomeScreen.classList.remove('hidden');
@@ -413,123 +615,166 @@
                 ELEMENTS.chatInput.value = '';
                 ELEMENTS.chatInput.focus();
                 adjustTextareaHeight();
+                ELEMENTS.editTitleBtn.disabled = true;
             }
 
-            // اتصال به WebSocket
+            // Connect to WebSocket
             function connectWebSocket() {
-                if (ws && ws.readyState === WebSocket.OPEN) return;
+                if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+                    console.log("WebSocket already open or connecting.");
+                    return;
+                }
                 
                 const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
                 ws = new WebSocket(`${wsProtocol}//${window.location.host}/api/ws/chat`);
                 
-                ws.onopen = () => console.log("WebSocket متصل شد.");
+                ws.onopen = () => {
+                    console.log("WebSocket connected.");
+                    showToast("اتصال با سرور برقرار شد.", 'info', 2000);
+                };
 
                 ws.onmessage = (event) => {
                     try {
                         const message = JSON.parse(event.data);
                         handleWebSocketMessage(message);
                     } catch (e) {
+                        // If it's not a JSON object, assume it's a raw text chunk
                         if (isGenerating) {
                             handleStreamChunk(event.data);
+                        } else {
+                            console.warn("Received non-JSON message outside of generation:", event.data);
                         }
                     }
                 };
 
-                ws.onclose = () => {
-                    console.log("WebSocket قطع شد. تلاش مجدد تا 5 ثانیه دیگر...");
-                    if (isGenerating) stopGeneration(false);
-                    setTimeout(connectWebSocket, 5000);
+                ws.onclose = (event) => {
+                    console.warn("WebSocket disconnected.", event.code, event.reason);
+                    if (isGenerating) stopGeneration(false); // Stop generation without sending "stop" signal
+                    showToast("اتصال با سرور قطع شد. تلاش مجدد...", 'warning');
+                    // Attempt to reconnect only if the disconnection wasn't intentional
+                    if (event.code !== 1000) { // 1000 is Normal Closure
+                         setTimeout(connectWebSocket, 5000); // Reconnect after 5 seconds
+                    }
                 };
                 
                 ws.onerror = (error) => {
-                    console.error("خطای WebSocket:", error);
-                    ws.close();
+                    console.error("WebSocket Error:", error);
+                    showToast("خطا در اتصال WebSocket. صفحه را رفرش کنید.", 'error');
+                    ws.close(); // Close immediately on error
                 };
             }
 
-            // پردازش پیام‌های WebSocket
+            // Process WebSocket control messages
             function handleWebSocketMessage(message) {
                 switch (message.type) {
                     case "info":
+                        // Sent by backend when a new conversation is initiated
                         if (!currentConversationId) {
                             currentConversationId = message.conversation_id;
-                            const newTitle = "مکالمه جدید...";
-                            const newItem = addConversationToList(currentConversationId, newTitle);
+                            const newTitle = "مکالمه جدید..."; // Backend initially sends this, title_update will follow
+                            const newItem = addConversationToList(currentConversationId, newTitle, new Date().toISOString());
                             document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
                             newItem.classList.add('active');
                             ELEMENTS.chatTitle.textContent = newTitle;
+                            ELEMENTS.editTitleBtn.disabled = false;
                         }
                         break;
                     case "title_update":
-                        const item = document.querySelector(`.sidebar-item[data-id="${message.conversation_id}"]`);
-                        if (item) {
-                            item.querySelector('span').textContent = message.title;
+                        // Backend generated a new title
+                        const itemToUpdate = document.querySelector(`.sidebar-item[data-id="${message.conversation_id}"]`);
+                        if (itemToUpdate) {
+                            itemToUpdate.querySelector('span').textContent = message.title;
                             if (currentConversationId === message.conversation_id) {
                                 ELEMENTS.chatTitle.textContent = message.title;
                             }
+                            // Re-sort the conversation list if creation_at changed (not happening now but good for future)
+                            // fetchConversations(); 
                         }
+                        showToast("عنوان مکالمه به‌روزرسانی شد.", 'info', 1500);
                         break;
                     case "stream_end":
-                        stopGeneration(false);
+                        // Stream has finished from the model
+                        stopGeneration(false); // Do not send "stop" to backend again
                         break;
                     case "error":
+                        // An error occurred on the backend or from Gemini API
                         stopGeneration(false);
-                        createMessageBubble("model", `**خطا:** ${message.message}`);
-                        showToast(`خطا: ${message.message}`);
+                        createMessageBubble("model", `**خطا:** ${message.content}`);
+                        showToast(`خطا: ${message.content}`, 'error');
+                        break;
+                    case "warning":
+                        // Warnings from Gemini API (e.g., safety, partial stop)
+                        showToast(`هشدار: ${message.content}`, 'warning');
                         break;
                 }
             }
 
-            // بهینه‌سازی پردازش استریم
+            // Handle incoming raw text chunks during streaming
             function handleStreamChunk(chunk) {
                 if (!isGenerating || !lastMessageElement) return;
 
                 const contentDiv = lastMessageElement.querySelector(".message-content");
+                // Remove the typing indicator if present
                 if (contentDiv.querySelector('.animate-pulse')) {
-                    contentDiv.innerHTML = ""; // حذف انیمیشن لودینگ
+                    contentDiv.innerHTML = ""; 
                 }
                 
+                // Append raw text to buffer. Do not parse Markdown repeatedly.
                 streamContentBuffer += chunk;
-                
-                // از marked.parse برای هر chunk استفاده نکنید، چون باعث فلیکر می‌شود.
-                // بهتر است در پایان استریم کل محتوا را یکجا parse کنید.
-                // برای نمایش زنده، فقط متن را به صورت خام اضافه می‌کنیم.
-                contentDiv.innerHTML = marked.parse(streamContentBuffer);
+                // Update text content for immediate visual feedback
+                contentDiv.textContent = streamContentBuffer; 
                 scrollToBottom();
             }
 
-            // شروع فرآیند تولید پاسخ
+            // Begin a new generation process (triggered by user sending message)
             function startGeneration() {
                 isGenerating = true;
-                ELEMENTS.sendButton.disabled = true;
                 ELEMENTS.sendButton.classList.add("hidden");
                 ELEMENTS.stopButton.classList.remove("hidden");
-                lastMessageElement = createMessageBubble("model", "");
-                streamContentBuffer = "";
+                ELEMENTS.chatInput.disabled = true; // Disable input during generation
+                lastMessageElement = createMessageBubble("model", ""); // Create an empty bubble with typing indicator
+                streamContentBuffer = ""; // Reset buffer
             }
             
-            // توقف فرآیند تولید پاسخ
+            // Stop the generation process (user-initiated or stream_end from backend)
             function stopGeneration(sendStopSignal = true) {
                 if (!isGenerating) return;
+
                 if (sendStopSignal && ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: "stop" }));
+                    console.log("Sent 'stop' signal to backend.");
                 }
+                
                 isGenerating = false;
-                ELEMENTS.sendButton.disabled = false;
                 ELEMENTS.sendButton.classList.remove("hidden");
                 ELEMENTS.stopButton.classList.add("hidden");
-                updateCodeBlocks();
-                lastMessageElement = null;
+                ELEMENTS.chatInput.disabled = false;
+                ELEMENTS.chatInput.focus();
+
+                // Final markdown parse and code highlighting
+                if (lastMessageElement) {
+                    const contentDiv = lastMessageElement.querySelector(".message-content");
+                    if (streamContentBuffer) { // Only parse if content was streamed
+                        contentDiv.innerHTML = marked.parse(streamContentBuffer);
+                    } else if (contentDiv.querySelector('.animate-pulse')) {
+                        // If stopped with no content (only typing indicator was shown)
+                        contentDiv.innerHTML = '<p class="text-text-secondary text-right text-xs pt-2">...پاسخ متوقف شد.</p>';
+                    }
+                    updateCodeBlocks();
+                }
+                lastMessageElement = null; // Clear reference
+                streamContentBuffer = ""; // Clear buffer
             }
 
-            // ارسال پیام
+            // Send a chat message
             function sendMessage(message) {
-                if (!message.trim() || isGenerating) return;
+                message = message.trim();
+                if (!message || isGenerating) return;
                 
                 if (!ws || ws.readyState !== WebSocket.OPEN) {
-                    console.error("WebSocket متصل نیست.");
-                    createMessageBubble("model", "**خطا: اتصال برقرار نیست. لطفاً صفحه را رفرش کنید.**");
-                    showToast("خطا: اتصال برقرار نیست.");
+                    console.error("WebSocket not connected.");
+                    showToast("اتصال شما با سرور قطع است. لطفا صفحه را رفرش کنید.", 'error');
+                    createMessageBubble("model", "**خطا:** اتصال با سرور قطع است.");
                     return;
                 }
 
@@ -551,40 +796,115 @@
                 ws.send(JSON.stringify(payload));
             }
 
-            // دریافت لیست مدل‌ها
+            // Fetch and populate AI models in the select dropdown
             async function fetchAndPopulateModels() {
                 try {
                     const response = await fetch(API_URLS.models);
+                    if (!response.ok) throw new Error("Failed to fetch models.");
                     const data = await response.json();
                     ELEMENTS.modelSelect.innerHTML = '';
+                    let defaultModelFound = false;
                     for (const key in data.models) {
                         const option = document.createElement('option');
                         option.value = key;
                         option.textContent = data.models[key].name;
                         option.title = data.models[key].description;
+                        if (key === "gemini-1.5-pro-latest") { // Set a default model
+                            option.selected = true;
+                            defaultModelFound = true;
+                        }
                         ELEMENTS.modelSelect.appendChild(option);
                     }
+                    if (!defaultModelFound && Object.keys(data.models).length > 0) {
+                        ELEMENTS.modelSelect.options[0].selected = true; // Select first if default not found
+                    }
                 } catch (error) {
-                    console.error("خطا در دریافت لیست مدل‌ها:", error);
-                    showToast("خطا در بارگذاری لیست مدل‌ها.");
+                    console.error("Error fetching models:", error);
+                    showToast("خطا در بارگذاری لیست مدل‌ها.", 'error');
                 }
             }
             
-            // تنظیم ارتفاع TextArea
+            // Adjust textarea height dynamically
             function adjustTextareaHeight() {
                 ELEMENTS.chatInput.style.height = 'auto';
                 ELEMENTS.chatInput.style.height = (ELEMENTS.chatInput.scrollHeight) + 'px';
+                if (parseInt(ELEMENTS.chatInput.style.height) > 200) { // Limit max height
+                    ELEMENTS.chatInput.style.overflowY = 'auto';
+                } else {
+                    ELEMENTS.chatInput.style.overflowY = 'hidden';
+                }
             }
 
-            // تنظیم متن مثال
+            // Set example prompt from welcome screen
             function setExamplePrompt(prompt) {
                 ELEMENTS.chatInput.value = prompt;
                 adjustTextareaHeight();
                 ELEMENTS.chatInput.focus();
+                // Optionally auto-send example prompts:
+                // sendMessage(prompt);
             }
-            window.setExamplePrompt = setExamplePrompt; // Make it accessible from HTML onclick
+            window.setExamplePrompt = setExamplePrompt; // Make it globally accessible for onclick in HTML
 
-            // تنظیم Event Listeners
+            // Toggle sidebar for mobile
+            function toggleSidebar() {
+                ELEMENTS.sidebar.classList.toggle('-translate-x-full');
+                ELEMENTS.sidebarOverlay.classList.toggle('active');
+            }
+            window.toggleSidebar = toggleSidebar; // Globalize for HTML onclick
+
+
+            // Edit Conversation Title logic
+            async function editConversationTitle() {
+                if (!currentConversationId) {
+                    showToast("برای ویرایش عنوان ابتدا یک مکالمه را انتخاب کنید یا شروع کنید.", 'warning');
+                    return;
+                }
+                ELEMENTS.newTitleInput.value = ELEMENTS.chatTitle.textContent;
+                ELEMENTS.editTitleModal.showModal();
+            }
+
+            async function saveNewTitle() {
+                const newTitle = ELEMENTS.newTitleInput.value.trim();
+                if (!newTitle) {
+                    showToast("عنوان جدید نمی‌تواند خالی باشد.", 'warning');
+                    return;
+                }
+                if (!currentConversationId) {
+                     showToast("خطا: شناسه مکالمه پیدا نشد.", 'error');
+                    ELEMENTS.editTitleModal.close();
+                    return;
+                }
+
+                try {
+                    const response = await fetch(API_URLS.updateConversationTitle(currentConversationId), {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ title: newTitle })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || 'Failed to update title.');
+                    }
+
+                    const data = await response.json();
+                    ELEMENTS.chatTitle.textContent = data.new_title;
+                    const item = document.querySelector(`.sidebar-item[data-id="${currentConversationId}"] span`);
+                    if (item) {
+                        item.textContent = data.new_title;
+                    }
+                    showToast("عنوان مکالمه با موفقیت به‌روزرسانی شد.", 'info', 2000);
+                    ELEMENTS.editTitleModal.close();
+                    fetchConversations(); // Re-fetch to re-sort if order depends on updated field
+                } catch (error) {
+                    console.error("Error saving new title:", error);
+                    showToast(`خطا در ذخیره عنوان: ${error.message}`, 'error');
+                }
+            }
+
+            // Setup all event listeners
             function setupEventListeners() {
                 ELEMENTS.chatForm.addEventListener('submit', (e) => {
                     e.preventDefault();
@@ -601,18 +921,35 @@
                 ELEMENTS.chatInput.addEventListener('input', adjustTextareaHeight);
                 ELEMENTS.stopButton.addEventListener('click', () => stopGeneration(true));
                 ELEMENTS.newChatBtn.addEventListener('click', newChat);
-                ELEMENTS.menuBtn.addEventListener('click', () => {
-                    ELEMENTS.sidebar.classList.toggle('-translate-x-full');
+                ELEMENTS.menuBtn.addEventListener('click', toggleSidebar);
+
+                // Edit title events
+                ELEMENTS.editTitleBtn.addEventListener('click', editConversationTitle);
+                ELEMENTS.saveNewTitleBtn.addEventListener('click', saveNewTitle);
+                
+                // Close modal on escape key
+                ELEMENTS.editTitleModal.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') ELEMENTS.editTitleModal.close();
+                });
+                // Submit new title with Enter key in input field
+                ELEMENTS.newTitleInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        saveNewTitle();
+                    }
                 });
             }
 
-            // شروع اولیه برنامه
+            // Initial setup when DOM is ready
             function init() {
                 setupEventListeners();
                 fetchAndPopulateModels();
                 fetchConversations();
                 connectWebSocket();
                 adjustTextareaHeight();
+                ELEMENTS.chatInput.focus();
+                // Initially disable edit title button until a conversation is selected
+                ELEMENTS.editTitleBtn.disabled = true;
             }
             
             init();
