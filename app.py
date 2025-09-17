@@ -1,213 +1,383 @@
+# --------------------------------------------------------------------------
+# Jarvis Elite V3 - ارتقا یافته توسط Gemini
+# تاریخ ارتقا: ۱۷ سپتامبر ۲۰۲۵
+# --------------------------------------------------------------------------
+
 import os
-import json
-import uuid
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone
-from typing import List, Dict, Generator, Any
+from typing import List, Dict, Any, AsyncGenerator
 
 import streamlit as st
-import httpx
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
+import google.generativeai as genai
 
-# --- 1. PAGE CONFIGURATION ---
+# --- 1. تنظیمات اولیه و پیکربندی ---
 st.set_page_config(
-    page_title="Jarvis Elite - Definitive Edition",
+    page_title="Jarvis Elite V3",
     page_icon="👑",
     layout="centered",
     initial_sidebar_state="expanded"
 )
 load_dotenv()
 
-# --- 2. CUSTOM CSS FOR A PREMIUM UI ---
-def load_assets():
-    st.markdown("""
-    <style>
-        .stButton>button { border-radius: 10px; border: 1px solid #404040; transition: all 0.2s ease; }
-        .stButton>button:hover { border-color: #3b82f6; color: #3b82f6; }
-        [data-testid="stSidebar"] { background-color: #111; border-right: 1px solid #222; }
-        .stChatMessage { border-radius: 12px; border: 1px solid #222; background-color: #1a1a1a; }
-        .stChatMessage:has(div[data-testid="stChatMessageContent.user"]) { background-color: #2563eb; color: white; }
-    </style>
-    """, unsafe_allow_html=True)
+# --- 2. لاگ‌گیری پیشرفته ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
-load_assets()
+# --- 3. کلاس مدیریت پیکربندی و کلیدها ---
+class Config:
+    """کلاسی برای نگهداری متمرکز تنظیمات و کلیدهای API."""
+    def __init__(self):
+        self.mongo_uri = os.getenv("MONGO_URI")
+        self.gemini_api_key = os.getenv("GEMINI_API_KEY")
+        self.user_id = "main_user" # در آینده می‌توان این را داینامیک کرد
 
-# --- 3. CONFIGURATION & STATE MANAGEMENT ---
-MONGO_URI = os.getenv("MONGO_URI")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-USER_ID = "main_user"
+        if not self.mongo_uri or not self.gemini_api_key:
+            st.error("لطفاً کلیدهای API را در فایل .env تنظیم کنید. (MONGO_URI, GEMINI_API_KEY)")
+            st.stop()
+        
+        # پیکربندی SDK گوگل
+        genai.configure(api_key=self.gemini_api_key)
 
-# Session State Initialization
-if "messages" not in st.session_state: st.session_state.messages = []
-if "conversations" not in st.session_state: st.session_state.conversations = []
-if "current_conv_id" not in st.session_state: st.session_state.current_conv_id = None
-if "current_title" not in st.session_state: st.session_state.current_title = "مکالمه جدید"
-if "notepad_content" not in st.session_state: st.session_state.notepad_content = "# یادداشت‌های من\n\n"
+# --- 4. کلاس مدیریت پایگاه داده (MongoDB) ---
+class DatabaseManager:
+    """کلاسی برای تمام تعاملات با پایگاه داده MongoDB."""
+    def __init__(self, mongo_uri: str, user_id: str):
+        self._client = AsyncIOMotorClient(mongo_uri)
+        self._db = self._client["jarvis_elite_v3"]
+        self._users_coll = self._db["users"]
+        self.user_id = user_id
 
-# --- 4. ASYNC DATABASE SETUP ---
-@st.cache_resource
-def get_db_client(): return AsyncIOMotorClient(MONGO_URI)
-client = get_db_client()
-db = client["jarvis_elite_definitive"]
-users_coll = db["users"]
+    async def get_conversations(self) -> List[Dict]:
+        """بازیابی لیست تمام مکالمات بدون پیام‌ها."""
+        doc = await self._users_coll.find_one(
+            {"_id": self.user_id},
+            {"conversations.messages": 0}
+        )
+        if not doc or "conversations" not in doc:
+            return []
+        return sorted(doc["conversations"], key=lambda c: c["created_at"], reverse=True)
 
-async def db_create_conversation(conv_id: str, title: str):
-    conv = {"_id": conv_id, "title": title, "created_at": datetime.now(timezone.utc), "messages": []}
-    await users_coll.update_one({"_id": USER_ID}, {"$push": {"conversations": conv}}, upsert=True)
+    async def get_messages(self, conv_id: str) -> List[Dict]:
+        """بازیابی پیام‌های یک مکالمه خاص."""
+        doc = await self._users_coll.find_one(
+            {"_id": self.user_id, "conversations._id": conv_id},
+            {"conversations.$": 1}
+        )
+        return doc["conversations"][0].get("messages", []) if doc and doc.get("conversations") else []
 
-async def db_get_conversations() -> List[Dict]:
-    doc = await users_coll.find_one({"_id": USER_ID}, {"conversations.messages": 0})
-    if not doc or "conversations" not in doc: return []
-    return sorted(doc["conversations"], key=lambda c: c["created_at"], reverse=True)
+    async def save_message(self, conv_id: str, msg: Dict):
+        """ذخیره یک پیام جدید در یک مکالمه."""
+        await self._users_coll.update_one(
+            {"_id": self.user_id, "conversations._id": conv_id},
+            {"$push": {"conversations.$.messages": msg}}
+        )
 
-async def db_get_messages(conv_id: str) -> List[Dict]:
-    doc = await users_coll.find_one({"_id": USER_ID, "conversations._id": conv_id}, {"conversations.$": 1})
-    return doc["conversations"][0].get("messages", []) if doc and doc.get("conversations") else []
+    async def create_conversation(self, title: str) -> str:
+        """ایجاد یک مکالمه جدید و برگرداندن ID آن."""
+        conv_id = str(uuid.uuid4())
+        conv = {
+            "_id": conv_id,
+            "title": title,
+            "created_at": datetime.now(timezone.utc),
+            "messages": []
+        }
+        await self._users_coll.update_one(
+            {"_id": self.user_id},
+            {"$push": {"conversations": conv}},
+            upsert=True
+        )
+        logger.info(f"مکالمه جدید با ID: {conv_id} ایجاد شد.")
+        return conv_id
 
-async def db_save_message(conv_id: str, msg: Dict):
-    await users_coll.update_one({"_id": USER_ID, "conversations._id": conv_id}, {"$push": {"conversations.$.messages": msg}})
+    async def delete_conversation(self, conv_id: str):
+        """حذف یک مکالمه."""
+        await self._users_coll.update_one(
+            {"_id": self.user_id},
+            {"$pull": {"conversations": {"_id": conv_id}}}
+        )
+        logger.info(f"مکالمه با ID: {conv_id} حذف شد.")
 
-async def db_save_notepad(content: str):
-    await users_coll.update_one({"_id": USER_ID}, {"$set": {"notepad": content}}, upsert=True)
 
-async def db_load_notepad() -> str:
-    doc = await users_coll.find_one({"_id": USER_ID}, {"notepad": 1})
-    return doc.get("notepad", "# یادداشت‌های من\n\n")
-
-# --- 5. AI CORE LOGIC (WITH DEFINITIVE MODEL LIST) ---
-MODELS = {
-    "چت متنی": {
-        "Gemini 2.5 Pro (قدرتمندترین | ۵ درخواست در دقیقه | ۱۰۰ در روز)": "gemini-1.5-pro-latest",
-        "Gemini 2.5 Flash (سریع | ۱۰ درخواست در دقیقه | ۲۵۰ در روز)": "gemini-1.5-flash-latest",
-        "Gemini 2.5 Flash-Lite (بهینه | ۱۵ درخواست در دقیقه | ۱۰۰۰ در روز)": "gemini-1.5-flash-latest",
-        "Gemini 2.0 Flash (پایدار | ۱۵ درخواست در دقیقه | ۲۰۰ در روز)": "gemini-1.0-pro",
-        "Gemini 2.0 Flash-Lite (سهمیه بالا | ۳۰ درخواست در دقیقه | ۲۰۰ در روز)": "gemini-1.0-pro-002",
-    },
-    "تولید تصویر": {
-        "Gemini 2.0 Image Generation (۱۰ درخواست در دقیقه | ۱۰۰ در روز)": "imagen-placeholder"
+# --- 5. کلاس مدیریت مدل هوش مصنوعی (Gemini) ---
+class GeminiClient:
+    """کلاسی برای تعامل با Gemini API."""
+    MODELS = {
+        "چت متنی 💬": {
+            "Gemini 1.5 Pro (قدرتمند)": "gemini-1.5-pro-latest",
+            "Gemini 1.5 Flash (سریع)": "gemini-1.5-flash-latest",
+        },
+        "تولید تصویر 🖼️": {
+            "Imagen 2 (به زودی)": "imagen-placeholder"
+        }
     }
-}
 
-async def stream_gemini_response(api_msgs: List[Dict], model: str) -> Generator[str, Any, None]:
-    if not GEMINI_API_KEY:
-        yield "**خطا: کلید API گوگل تنظیم نشده است.**"
-        return
-        
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    def __init__(self, system_prompt: str = ""):
+        self.system_prompt = system_prompt
+
+    def _prepare_api_messages(self, history: List[Dict]) -> List[Dict]:
+        """تبدیل تاریخچه چت به فرمت مورد نیاز API."""
+        api_messages = []
+        for msg in history:
+            role = "user" if msg["role"] == "user" else "model"
+            api_messages.append({"role": role, "parts": [{"text": msg["content"]}]})
+        return api_messages
+
+    async def stream_chat_response(
+        self,
+        model_id: str,
+        history: List[Dict],
+        generation_config: Dict
+    ) -> AsyncGenerator[str, Any]:
+        """ارسال درخواست به Gemini و دریافت پاسخ به صورت استریم."""
         try:
-            async with client.stream("POST", f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?key={GEMINI_API_KEY}", json={"contents": api_msgs}) as response:
-                response.raise_for_status()
-                async for chunk in response.aiter_bytes():
-                    for line in chunk.decode('utf-8').splitlines():
-                        if '"text":' in line:
-                            try:
-                                yield json.loads("{" + line.strip().rstrip(',') + "}").get("text", "")
-                            except Exception: continue
-        except httpx.HTTPStatusError as e:
-            yield f"**خطا:** سهمیه رایگان تمام شده یا خطایی در API رخ داده است.\n\n`{e.response.text}`"
+            model = genai.GenerativeModel(
+                model_name=model_id,
+                system_instruction=self.system_prompt if self.system_prompt else None
+            )
+            api_messages = self._prepare_api_messages(history)
+            
+            response_stream = await model.generate_content_async(
+                api_messages,
+                stream=True,
+                generation_config=generation_config
+            )
+            async for chunk in response_stream:
+                if chunk.text:
+                    yield chunk.text
+
         except Exception as e:
-            yield f"**خطای اتصال:** `{str(e)}`"
+            logger.error(f"خطا در ارتباط با Gemini API: {e}")
+            yield f"**خطای API:** `{str(e)}`"
 
-async def generate_image(prompt: str) -> str:
-    await asyncio.sleep(3)
-    return f"https://picsum.photos/seed/{uuid.uuid4().hex[:10]}/1024/1024"
+    async def generate_image(self, prompt: str) -> str:
+        """تولید تصویر (در حال حاضر یک Placeholder است)."""
+        logger.info(f"درخواست تولید تصویر برای: {prompt}")
+        await asyncio.sleep(2) # شبیه‌سازی تاخیر شبکه
+        # این یک placeholder است. در آینده با API واقعی جایگزین شود.
+        # 
+        return f"https://picsum.photos/seed/{uuid.uuid4().hex[:10]}/1024/1024"
 
-# --- 6. SIDEBAR UI ---
-def sidebar_ui():
-    with st.sidebar:
-        st.title("👑 Jarvis Elite Definitive")
-        
-        if st.button("➕ مکالمه جدید", use_container_width=True):
-            st.session_state.current_conv_id = None
-            st.session_state.messages = []
-            st.session_state.current_title = "مکالمه جدید"
+
+# --- 6. کلاس مدیریت رابط کاربری (Streamlit) ---
+class UIManager:
+    """کلاسی برای رندر کردن تمام اجزای UI و مدیریت تعاملات کاربر."""
+    def __init__(self, config: Config, db_manager: DatabaseManager):
+        self.config = config
+        self.db = db_manager
+        self._initialize_session_state()
+
+    def _initialize_session_state(self):
+        """مقداردهی اولیه تمام متغیرهای مورد نیاز در session state."""
+        defaults = {
+            "messages": [],
+            "conversations": [],
+            "current_conv_id": None,
+            "current_title": "مکالمه جدید",
+            "system_prompt": "You are Jarvis, a powerful and helpful AI assistant.",
+            "temperature": 0.7,
+            "top_p": 1.0,
+        }
+        for key, value in defaults.items():
+            if key not in st.session_state:
+                st.session_state[key] = value
+
+    def _render_css(self):
+        """اعمال استایل‌های سفارشی CSS."""
+        st.markdown("""
+        <style>
+            .stButton>button { border-radius: 8px; font-weight: bold; transition: all 0.2s ease-in-out; }
+            .stButton>button:hover { transform: scale(1.05); }
+            .stChatMessage { border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1); }
+            [data-testid="stSidebar"] { background-color: #09090b; border-right: 1px solid rgba(255, 255, 255, 0.1); }
+            .sidebar-conv-button {
+                display: block; width: 100%; text-align: left;
+                background-color: transparent; border: none; padding: 8px;
+                border-radius: 8px; margin-bottom: 5px; color: #FAFAFA;
+                transition: background-color 0.2s;
+            }
+            .sidebar-conv-button:hover { background-color: rgba(255, 255, 255, 0.1); }
+            .active-conv { background-color: #2563eb; }
+        </style>
+        """, unsafe_allow_html=True)
+    
+    async def _render_sidebar(self):
+        """رندر کردن سایدبار، شامل لیست مکالمات و تنظیمات."""
+        with st.sidebar:
+            st.title("👑 Jarvis Elite V3")
+            st.markdown("---")
+            
+            if st.button("➕ مکالمه جدید", use_container_width=True):
+                st.session_state.current_conv_id = None
+                st.session_state.messages = []
+                st.session_state.current_title = "مکالمه جدید"
+                st.rerun()
+
+            st.markdown("---")
+            st.subheader("تاریخچه مکالمات")
+
+            # بارگذاری مکالمات یک بار و کش کردن آن
+            if not st.session_state.conversations:
+                st.session_state.conversations = await self.db.get_conversations()
+
+            if not st.session_state.conversations:
+                st.info("هنوز مکالمه‌ای شروع نشده است.")
+
+            for conv in st.session_state.conversations:
+                col1, col2 = st.columns([4, 1])
+                conv_title = conv['title'][:30] + "..." if len(conv['title']) > 30 else conv['title']
+                
+                with col1:
+                    is_active = conv['_id'] == st.session_state.current_conv_id
+                    if st.button(f"📜 {conv_title}", key=f"load_{conv['_id']}", use_container_width=True):
+                        st.session_state.current_conv_id = conv['_id']
+                        st.session_state.current_title = conv['title']
+                        st.session_state.messages = await self.db.get_messages(conv['_id'])
+                        st.rerun()
+                
+                with col2:
+                    if st.button("🗑️", key=f"del_{conv['_id']}", help="حذف مکالمه"):
+                        await self.db.delete_conversation(conv['_id'])
+                        st.session_state.conversations = [] # برای بارگذاری مجدد
+                        if st.session_state.current_conv_id == conv['_id']:
+                            st.session_state.current_conv_id = None
+                            st.session_state.messages = []
+                        st.toast(f"مکالمه '{conv['title']}' حذف شد.")
+                        await asyncio.sleep(1) # زمان برای دیدن toast
+                        st.rerun()
+            
+            st.markdown("---")
+            with st.expander("⚙️ تنظیمات پیشرفته"):
+                st.text_area("دستور سیستمی (System Prompt)", key="system_prompt", height=150)
+                st.slider("دما (Temperature)", min_value=0.0, max_value=2.0, step=0.1, key="temperature",
+                          help="مقادیر بالاتر خلاقیت بیشتر و مقادیر پایین‌تر دقت بیشتری به همراه دارند.")
+                st.slider("Top-P", min_value=0.0, max_value=1.0, step=0.05, key="top_p")
+
+
+    def _render_header(self):
+        """رندر کردن هدر اصلی صفحه."""
+        col1, col2 = st.columns([3, 2])
+        with col1:
+            st.header(st.session_state.current_title)
+        with col2:
+            active_mode = st.radio("حالت:", list(GeminiClient.MODELS.keys()), horizontal=True, label_visibility="collapsed")
+            model_options = GeminiClient.MODELS[active_mode]
+            selected_model_name = st.selectbox("مدل:", list(model_options.keys()), label_visibility="collapsed")
+            return active_mode, model_options[selected_model_name]
+
+    def _render_chat_history(self):
+        """رندر کردن پیام‌های تاریخچه چت."""
+        chat_container = st.container(height=500, border=False)
+        for msg in st.session_state.messages:
+            avatar = "🧑‍💻" if msg["role"] == "user" else "🤖"
+            with chat_container.chat_message(msg["role"], avatar=avatar):
+                if msg.get("type") == "image":
+                    st.image(msg["content"], caption=msg.get("prompt", ""))
+                else:
+                    st.markdown(msg["content"])
+                    
+    async def _handle_user_input(self, active_mode: str, selected_model_id: str):
+        """پردازش ورودی کاربر و تولید پاسخ."""
+        if prompt := st.chat_input("پیام خود را بنویسید..."):
+            # 1. اگر مکالمه جدید است، آن را در دیتابیس ایجاد کن
+            if not st.session_state.current_conv_id:
+                title = prompt[:50]
+                with st.spinner("ایجاد مکالمه جدید..."):
+                    conv_id = await self.db.create_conversation(title)
+                st.session_state.current_conv_id = conv_id
+                st.session_state.current_title = title
+                st.session_state.conversations = [] # برای بارگذاری مجدد لیست در سایدبار
+                st.rerun()
+
+            conv_id = st.session_state.current_conv_id
+
+            # 2. پیام کاربر را به UI و دیتابیس اضافه کن
+            user_msg = {"role": "user", "content": prompt}
+            st.session_state.messages.append(user_msg)
+            await self.db.save_message(conv_id, user_msg)
+            
+            # 3. نمایش پیام کاربر و آماده‌سازی برای پاسخ AI
             st.rerun()
 
-        st.markdown("---")
-
-        # دفترچه یادداشت
-        with st.expander("📝 دفترچه یادداشت"):
-            st.session_state.notepad_content = st.text_area(
-                "یادداشت‌ها:",
-                value=st.session_state.notepad_content,
-                height=200,
-                key="notepad",
-                on_change=lambda: asyncio.run(db_save_notepad(st.session_state.notepad))
-            )
-
-        with st.expander("⚙️ تنظیمات"):
-            st.session_state.save_mode = st.toggle("حالت ذخیره انرژی", value=False)
-            st.session_state.system_prompt = st.selectbox("شخصیت AI:", list(MODELS["چت متنی"].keys()))
-
-        st.markdown("---")
-        st.markdown("**تاریخچه مکالمات**")
-
-        if not st.session_state.conversations:
-            st.session_state.conversations = asyncio.run(db_get_conversations())
-
-        for conv in st.session_state.conversations:
-            if st.button(conv['title'], key=conv['_id'], use_container_width=True, type="secondary"):
-                st.session_state.current_conv_id = conv['_id']
-                st.session_state.current_title = conv['title']
-                st.session_state.messages = asyncio.run(db_get_messages(conv['_id']))
-                st.rerun()
-
-# --- 7. MAIN APP ---
-sidebar_ui()
-
-col1, col2 = st.columns([3, 2])
-col1.header(st.session_state.current_title)
-with col2:
-    active_mode = st.radio("حالت:", list(MODELS.keys()), horizontal=True, label_visibility="collapsed")
-    model_options = MODELS[active_mode]
-    selected_model_name = st.selectbox("مدل:", list(model_options.keys()), label_visibility="collapsed")
-    selected_model_id = model_options[selected_model_name]
-
-chat_container = st.container(height=500, border=False)
-for msg in st.session_state.messages:
-    with chat_container.chat_message(msg["role"], avatar="🧑‍💻" if msg["role"] == "user" else "🤖"):
-        if msg.get("type") == "image": st.image(msg["content"])
-        else: st.markdown(msg["content"])
-
-# پیام جدید کاربر
-if prompt := st.chat_input("پیام خود را بنویسید..."):
-    conv_id = st.session_state.current_conv_id
-    if not conv_id:
-        conv_id = str(uuid.uuid4())
-        st.session_state.current_conv_id = conv_id
-        st.session_state.current_title = prompt[:50]
-        asyncio.run(db_create_conversation(conv_id, prompt[:50]))
-        st.session_state.conversations = []  # Force reload
-
-    user_message = {"_id": str(uuid.uuid4()), "role": "user", "type": "text", "content": prompt}
-    st.session_state.messages.append(user_message)
-    asyncio.run(db_save_message(conv_id, user_message))
-    st.rerun()
-
-# پاسخ AI
-if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-    last_prompt = st.session_state.messages[-1]["content"]
-    conv_id = st.session_state.current_conv_id
-    
-    with chat_container.chat_message("assistant", avatar="🤖"):
-        if active_mode == "چت متنی":
-            text_history = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in st.session_state.messages if m['type'] == 'text']
-            response_generator = stream_gemini_response(text_history, selected_model_id)
-            full_response = st.write_stream(response_generator)
+    async def _process_response(self, active_mode: str, selected_model_id: str):
+        """بررسی آخرین پیام و در صورت نیاز، تولید و نمایش پاسخ AI."""
+        # تنها زمانی پاسخ تولید کن که آخرین پیام از طرف کاربر باشد
+        if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+            conv_id = st.session_state.current_conv_id
             
-            if "خطا:" not in full_response:
-                ai_message = {"_id": str(uuid.uuid4()), "role": "assistant", "type": "text", "content": full_response}
-                st.session_state.messages.append(ai_message)
-                asyncio.run(db_save_message(conv_id, ai_message))
-                st.rerun()
+            with st.chat_message("assistant", avatar="🤖"):
+                gemini_client = GeminiClient(st.session_state.system_prompt)
+                
+                if active_mode == "تولید تصویر 🖼️":
+                    with st.spinner("درحال تولید تصویر... 🎨"):
+                        prompt = st.session_state.messages[-1]["content"]
+                        image_url = await gemini_client.generate_image(prompt)
+                        st.image(image_url, caption=prompt)
+                        ai_msg = {"role": "assistant", "type": "image", "content": image_url, "prompt": prompt}
+                else: # حالت چت متنی
+                    placeholder = st.empty()
+                    full_response = ""
+                    generation_config = {
+                        "temperature": st.session_state.temperature,
+                        "top_p": st.session_state.top_p
+                    }
+                    history = st.session_state.messages
+                    
+                    try:
+                        async for chunk in gemini_client.stream_chat_response(selected_model_id, history, generation_config):
+                            full_response += chunk
+                            placeholder.markdown(full_response + "▌")
+                        placeholder.markdown(full_response)
+                        ai_msg = {"role": "assistant", "content": full_response}
+                    except Exception as e:
+                        full_response = f"متاسفانه خطایی رخ داد: {e}"
+                        placeholder.error(full_response)
+                        ai_msg = {"role": "assistant", "content": full_response}
+                
+                # 4. ذخیره پاسخ AI در دیتابیس و session state
+                st.session_state.messages.append(ai_msg)
+                await self.db.save_message(conv_id, ai_msg)
+    
+    async def render(self):
+        """متد اصلی برای رندر کردن کل صفحه."""
+        self._render_css()
+        await self._render_sidebar()
+        active_mode, selected_model_id = self._render_header()
+        self._render_chat_history()
+        
+        # این بخش‌ها به صورت جداگانه اجرا می‌شوند تا UI سریع‌تر پاسخ دهد
+        await self._handle_user_input(active_mode, selected_model_id)
+        await self._process_response(active_mode, selected_model_id)
 
-        elif active_mode == "تولید تصویر":
-            with st.spinner("در حال خلق اثر هنری..."):
-                image_url = asyncio.run(generate_image(last_prompt))
-                st.image(image_url)
-                ai_message = {"_id": str(uuid.uuid4()), "role": "assistant", "type": "image", "content": image_url}
-                st.session_state.messages.append(ai_message)
-                asyncio.run(db_save_message(conv_id, ai_message))
-                st.rerun()
+# --- 7. نقطه شروع برنامه ---
+async def main():
+    """تابع اصلی برنامه که به صورت async اجرا می‌شود."""
+    st.title(" ") # برای ایجاد فضای خالی در بالای صفحه
+    try:
+        config = Config()
+        
+        # @st.cache_resource برای جلوگیری از ساخت مجدد در هر بار rerun
+        @st.cache_resource
+        def get_db_manager():
+            return DatabaseManager(config.mongo_uri, config.user_id)
+            
+        db_manager = get_db_manager()
+        ui_manager = UIManager(config, db_manager)
+        await ui_manager.render()
+
+    except Exception as e:
+        logger.error(f"یک خطای بحرانی در برنامه رخ داد: {e}")
+        st.error(f"یک خطای غیرمنتظره رخ داد. لطفاً صفحه را رفرش کنید. جزئیات: {e}")
+
+
+if __name__ == "__main__":
+    # اجرای برنامه در یک event loop برای مدیریت صحیح async/await
+    asyncio.run(main())
