@@ -7,3 +7,4 @@ httpx
 jinja2
 websockets
 cachetools
+motor
