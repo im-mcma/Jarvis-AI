@@ -345,7 +345,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     async def chat_generator_task(message_text: str, conversation_id: Optional[str], model: str):
         """Task to handle the full chat generation process."""
-        nonlocal conversation_id # Allow modifying the conversation_id from outside
+        # The 'nonlocal' line has been removed.
         initial_conv_creation = False
         full_assistant_message = ""
 
