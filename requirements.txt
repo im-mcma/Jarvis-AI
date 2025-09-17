@@ -1,5 +1,4 @@
-fastapi
-uvicorn[standard]
+streamlit
 python-dotenv
-motor
 httpx
+motor
