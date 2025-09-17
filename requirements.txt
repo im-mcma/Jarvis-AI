@@ -1,8 +1,7 @@
 fastapi
 uvicorn[standard]
 python-dotenv
-google-cloud-firestore
-google-auth
+pymongo[srv]
 pydantic
 httpx
 jinja2
