@@ -2,4 +2,5 @@ streamlit
 python-dotenv
 motor
 google-generativeai
-asyncio
+nest-asyncio
+gTTS
