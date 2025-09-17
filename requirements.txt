@@ -2,3 +2,6 @@ streamlit
 python-dotenv
 httpx
 motor
+streamlit-ace
+pydub
+speechrecognition
