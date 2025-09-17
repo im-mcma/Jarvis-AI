@@ -1,10 +1,5 @@
 fastapi
 uvicorn[standard]
 python-dotenv
-pymongo[srv]
-pydantic
-httpx
-jinja2
-websockets
-cachetools
 motor
+httpx
