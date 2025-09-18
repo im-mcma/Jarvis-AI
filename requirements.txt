@@ -3,3 +3,4 @@ motor
 bcrypt
 pandas
 google-generativeai
+jwt
