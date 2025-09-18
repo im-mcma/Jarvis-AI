@@ -1,6 +1,8 @@
 streamlit
+pymongo
 motor
 bcrypt
 pandas
 google-generativeai
 jwt
+pyjwt
