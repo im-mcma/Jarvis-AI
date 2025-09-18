@@ -2,9 +2,8 @@ import os
 import json
 import uuid
 import asyncio
-import logging
 from datetime import datetime, timezone
-from typing import List, Dict, Generator, Any
+from typing import List, Dict, Any, AsyncGenerator
 from io import BytesIO
 
 import streamlit as st
@@ -15,17 +14,18 @@ from gtts import gTTS
 
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="Jarvis Elite - Definitive Edition",
+    page_title="جارویس الیت - نسخه نهایی",
     page_icon="👑",
     layout="centered",
     initial_sidebar_state="expanded"
 )
 load_dotenv()
 
-# --- 2. CUSTOM CSS FOR A PREMIUM UI ---
+# --- 2. CUSTOM CSS ---
 st.markdown("""
 <style>
-    /* Professional look and feel */
+    /* Professional look */
+    body {direction: rtl;}
     .stButton>button { border-radius: 8px; border: 1px solid #404040; transition: all 0.2s ease; }
     .stButton>button:hover { border-color: #3b82f6; color: #3b82f6; }
     [data-testid="stSidebar"] { background-color: #111; border-right: 1px solid #222; padding: 1rem; }
@@ -37,21 +37,22 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CONFIGURATION & STATE MANAGEMENT ---
+# --- 3. CONFIGURATION & STATE ---
 MONGO_URI = os.getenv("MONGO_URI")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 USER_ID = "main_user"
 
-# Initialize Session State
 if "messages" not in st.session_state: st.session_state.messages = []
 if "conversations" not in st.session_state: st.session_state.conversations = []
 if "current_conv_id" not in st.session_state: st.session_state.current_conv_id = None
 if "current_title" not in st.session_state: st.session_state.current_title = "مکالمه جدید"
 if "initialized" not in st.session_state: st.session_state.initialized = False
 
-# --- 4. ASYNC DATABASE SETUP ---
+# --- 4. ASYNC DATABASE ---
 @st.cache_resource
-def get_db_client(): return AsyncIOMotorClient(MONGO_URI)
+def get_db_client(): 
+    return AsyncIOMotorClient(MONGO_URI)
+
 client = get_db_client()
 db = client["jarvis_elite_definitive"]
 users_coll = db["users"]
@@ -72,23 +73,27 @@ async def db_get_messages(conv_id: str) -> List[Dict]:
 async def db_save_message(conv_id: str, msg: Dict):
     await users_coll.update_one({"_id": USER_ID, "conversations._id": conv_id}, {"$push": {"conversations.$.messages": msg}})
 
-# --- 5. AI CORE LOGIC (WITH YOUR DEFINITIVE MODEL LIST) ---
+# --- 5. AI CORE LOGIC ---
 MODELS = {
     "چت متنی": {
-        "Gemini 2.5 Pro (قدرتمندترین | RPM: 5, RPD: 100)": "gemini-1.5-pro-latest",
-        "Gemini 2.5 Flash (سریع و جدید | RPM: 10, RPD: 250)": "gemini-1.5-flash-latest",
-        "Gemini 2.5 Flash-Lite (بسیار بهینه | RPM: 15, RPD: 1,000)": "gemini-1.5-flash-latest",
-        "Gemini 2.0 Flash (پایدار | RPM: 15, RPD: 200)": "gemini-1.0-pro",
-        "Gemini 2.0 Flash-Lite (سهمیه بالا | RPM: 30, RPD: 200)": "gemini-1.0-pro-002",
+        "Gemini 2.5 Pro (قدرتمندترین)": "gemini-2.5-pro",
+        "Gemini 2.5 Flash (سریع و جدید)": "gemini-2.5-flash",
+        "Gemini 2.5 Flash-Lite (بسیار بهینه)": "gemini-2.5-flash-lite",
+        "Gemini 2.0 Pro (نسل قبلی)": "gemini-2.0-pro",
+        "Gemini 2.0 Flash (سریع نسل قبلی)": "gemini-2.0-flash"
     },
     "تولید تصویر": {
-        "Gemini 2.0 Image Generation (RPM: 10, RPD: 100)": "imagen-placeholder"
+        "Gemini 2.5 Flash Image": "gemini-2.5-flash-image-preview",
+        "Gemini 2.0 Flash Image": "gemini-2.0-flash-image"
+    },
+    "تولید ویدیو": {
+        "Veo 3 (رایگان)": "veo-3"
     }
 }
 
 async def stream_gemini_response(api_msgs: List[Dict], model: str) -> AsyncGenerator[str, Any]:
     if not GEMINI_API_KEY:
-        yield "**خطا: کلید API گوگل (GEMINI_API_KEY) در متغیرهای محیطی Render تنظیم نشده است.**"
+        yield "**خطا: کلید API گوگل تنظیم نشده است.**"
         return
     genai.configure(api_key=GEMINI_API_KEY)
     try:
@@ -100,13 +105,13 @@ async def stream_gemini_response(api_msgs: List[Dict], model: str) -> AsyncGener
         yield f"**خطای API:** `{e}`"
 
 async def generate_image(prompt: str) -> str:
+    # نمونه تولید تصویر با placeholder (می‌توانید جایگزین Gemini Image API کنید)
     await asyncio.sleep(2)
     return f"https://picsum.photos/seed/{uuid.uuid4().hex[:10]}/1024/768"
 
-# --- 6. MAIN APPLICATION ---
-# Sidebar UI
+# --- 6. SIDEBAR UI ---
 with st.sidebar:
-    st.title("👑 Jarvis Elite")
+    st.title("👑 جارویس الیت")
     if st.button("➕ مکالمه جدید", use_container_width=True, type="primary"):
         st.session_state.current_conv_id = None
         st.session_state.messages = []
@@ -129,18 +134,17 @@ with st.sidebar:
                 st.session_state.messages = asyncio.run(db_get_messages(conv['_id']))
                 st.rerun()
 
-# Header UI
+# --- HEADER UI ---
 col1, col2 = st.columns([2, 3])
 col1.header(st.session_state.current_title)
 with col2:
     active_mode = st.radio("حالت:", list(MODELS.keys()), horizontal=True, label_visibility="collapsed")
     model_options = MODELS[active_mode]
     selected_model_name = st.selectbox("مدل:", list(model_options.keys()), label_visibility="collapsed")
-    # Handle potential aliasing (e.g., Flash vs Flash-Lite pointing to same tech ID)
     technical_model_id = model_options[selected_model_name]
 
-# Chat History UI
-chat_container = st.container(height=500, border=False)
+# --- CHAT HISTORY ---
+chat_container = st.container()
 for msg in st.session_state.messages:
     with chat_container.chat_message(msg["role"], avatar="🧑‍💻" if msg["role"] == "user" else "🤖"):
         if msg.get("type") == "image":
@@ -148,7 +152,7 @@ for msg in st.session_state.messages:
         else:
             st.markdown(msg["content"])
 
-# --- Main Logic: Handle new input and generate response ---
+# --- HANDLE USER INPUT ---
 if prompt := st.chat_input("پیام خود را بنویسید..."):
     conv_id = st.session_state.current_conv_id
     is_new_conv = not conv_id
@@ -162,21 +166,19 @@ if prompt := st.chat_input("پیام خود را بنویسید..."):
     st.session_state.messages.append(user_message)
     asyncio.run(db_save_message(conv_id, user_message))
     
-    if is_new_conv: # Reload conversations list in sidebar if new chat started
+    if is_new_conv:
         st.session_state.conversations = asyncio.run(db_get_conversations())
 
     st.rerun()
 
-# This part runs AFTER the user message has been displayed
+# --- GENERATE AI RESPONSE ---
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     last_prompt = st.session_state.messages[-1]["content"]
     conv_id = st.session_state.current_conv_id
     
     with chat_container.chat_message("assistant", avatar="🤖"):
         if active_mode == "چت متنی":
-            # Filter for text messages for chat history
             text_history = [{"role": m["role"], "parts": [{"text": m["content"]}]} for m in st.session_state.messages if m['type'] == 'text']
-            
             with st.spinner("در حال فکر کردن..."):
                 response_generator = stream_gemini_response(text_history, technical_model_id)
                 full_response = st.write_stream(response_generator)
