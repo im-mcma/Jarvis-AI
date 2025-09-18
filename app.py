@@ -36,7 +36,7 @@ if "conversations" not in st.session_state: st.session_state.conversations = []
 if "current_conv_id" not in st.session_state: st.session_state.current_conv_id = None
 if "current_title" not in st.session_state: st.session_state.current_title = "مکالمه جدید"
 if "initialized" not in st.session_state: st.session_state.initialized = False
-if "media_mode" not in st.session_state: st.session_state.media_mode = False  # Toggle for image/video
+if "media_mode" not in st.session_state: st.session_state.media_mode = False
 if "last_media" not in st.session_state: st.session_state.last_media = None
 
 # --- 3. DB ---
@@ -95,7 +95,7 @@ async def stream_gemini_response(api_msgs: List[Dict], model: str) -> AsyncGener
 
 async def generate_media(prompt: str, model_id: str) -> str:
     # placeholder برای تصویر/ویدیو، می‌توان API اصلی Gemini Image/Video را جایگزین کرد
-    import time, random
+    import time
     time.sleep(2)
     return f"https://picsum.photos/seed/{uuid.uuid4().hex[:10]}/1024/768"
 
@@ -174,7 +174,12 @@ if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
                 st.session_state.last_media = media_url
                 if media_type=="تولید تصویر": st.image(media_url)
                 else: st.video(media_url)
-                ai_msg = {"_id": str(uuid.uuid4()), "role":"assistant", "type": "image" if media_type=="تولید تصویر" else "video", "content": media_url}
+                ai_msg = {
+                    "_id": str(uuid.uuid4()),
+                    "role":"assistant",
+                    "type": "image" if media_type=="تولید تصویر" else "video",
+                    "content": media_url
+                }
                 st.session_state.messages.append(ai_msg)
                 asyncio.run(db_save_message(conv_id, ai_msg))
                 st.rerun()
