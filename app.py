@@ -6,202 +6,225 @@ import logging
 import time
 import pandas as pd
 import uuid
-from datetime import datetime, timezone
+import jwt
+from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 import google.generativeai as genai
 from google.api_core.exceptions import GoogleAPICallError
 
 # ==============================================================================
-# ۱. تنظیمات اولیه و پیکربندی
+# ۱. فاز ۱.۳: پیکربندی و استایل (Config & Styling)
 # ==============================================================================
 
-# --- تنظیمات صفحه ---
+# st.set_page_config فقط یک بار در ابتدای اسکریپت فراخوانی می‌شود
 st.set_page_config(page_title="Jarvis Elite", layout="wide", initial_sidebar_state="collapsed")
 
-# --- بارگذاری استایل سفارشی ---
-def load_css(file_path):
-    try:
-        with open(file_path) as f:
-            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-    except FileNotFoundError:
-        st.warning(f"فایل CSS در مسیر '{file_path}' یافت نشد.")
+# تمام CSS به صورت داخلی برای حذف وابستگی به فایل خارجی
+APP_CSS = """
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700&display=swap');
 
-load_css("assets/style.css")
+    /* General Styling */
+    html, body, [class*="st-"], .st-emotion-cache-1yycg8b, .st-emotion-cache-1av2t4g {
+        font-family: 'Vazirmatn', sans-serif;
+        direction: rtl;
+    }
 
-# --- تنظیمات لاگ‌گیری ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    /* Responsive Design for smaller screens */
+    @media (max-width: 768px) {
+        .st-emotion-cache-1cypcdb {
+            flex-direction: column;
+        }
+    }
 
-# --- ۱.۱. پیکربندی هوش مصنوعی ---
+    /* Custom Buttons */
+    .stButton>button[kind="primary"] {
+        background-color: #3b82f6;
+        color: white;
+        border-radius: 12px;
+        border: none;
+        padding: 12px 24px;
+        transition: background-color 0.2s ease-in-out;
+    }
+    .stButton>button[kind="primary"]:hover {
+        background-color: #2563eb;
+    }
+
+    /* Chat UI enhancements */
+    .stChatMessage {
+        border-radius: 12px;
+        border: 1px solid #374151;
+        background-color: #1f2937;
+        margin-bottom: 1rem;
+    }
+    .stChatMessage:has(div[data-testid="stChatMessageContent.user"]) {
+        background-color: #2563eb;
+        color: white;
+    }
+</style>
+"""
+st.markdown(APP_CSS, unsafe_allow_html=True)
+
+# --- بارگذاری اطلاعات حساس ---
 try:
     MONGO_URI = st.secrets["mongo"]["uri"]
     GEMINI_API_KEY = st.secrets["google_ai"]["api_key"]
+    JWT_SECRET_KEY = st.secrets["auth"]["jwt_secret_key"]
     genai.configure(api_key=GEMINI_API_KEY)
 except KeyError as e:
-    st.error(f"خطا: مقدار '{e.args[0]}' در فایل secrets.toml تعریف نشده است.")
+    st.error(f"خطا در فایل secrets.toml: مقدار '{e.args[0]}' یافت نشد.")
     st.stop()
 
-
 # ==============================================================================
-# ۲. ماژول پایگاه داده (بازسازی شده)
+# ۲. ماژول پایگاه داده (Database Module)
 # ==============================================================================
 
 @st.cache_resource
 def get_db_client():
     try:
         client = AsyncIOMotorClient(MONGO_URI)
-        logging.info("MongoDB client connected successfully.")
         return client
     except Exception as e:
-        logging.error(f"Failed to connect to MongoDB: {e}")
-        st.error("اتصال به پایگاه داده برقرار نشد.")
+        st.error(f"اتصال به پایگاه داده ناموفق بود: {e}")
         st.stop()
 
-client = get_db_client()
-db = client["jarvis_elite_app"]
+db = get_db_client().jarvis_elite_final
 users_coll = db["users"]
-conversations_coll = db["conversations"] # کالکشن مجزا برای مکالمات
+conversations_coll = db["conversations"]
 
-# --- توابع مرتبط با کاربر ---
 async def get_user_by_email(email: str):
     return await users_coll.find_one({"email": email})
-async def create_user(name: str, email: str, hashed_password: str):
-    await users_coll.insert_one({"name": name, "email": email, "password": hashed_password})
-async def update_user_profile(user_id: str, updates: dict):
-    await users_coll.update_one({"_id": ObjectId(user_id)}, {"$set": updates})
 
-# --- توابع مرتبط با مکالمات (بازسازی شده) ---
-async def db_create_conversation(user_id: str, title: str):
-    conv_data = {
-        "user_id": ObjectId(user_id),
-        "title": title,
-        "created_at": datetime.now(timezone.utc),
-        "messages": []
+# ... (سایر توابع پایگاه داده در ادامه استفاده می‌شوند)
+
+# ==============================================================================
+# ۳. فاز ۱.۲: ماژول احراز هویت با JWT (Auth Module)
+# ==============================================================================
+
+def hash_password(password: str): return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+def verify_password(p, h): return bcrypt.checkpw(p.encode(), h.encode())
+
+def create_jwt_token(user_info: dict):
+    payload = {
+        "exp": datetime.now(timezone.utc) + timedelta(days=1),
+        "iat": datetime.now(timezone.utc),
+        "sub": user_info["id"],
+        "name": user_info["name"],
+        "email": user_info["email"]
     }
-    result = await conversations_coll.insert_one(conv_data)
-    return str(result.inserted_id)
+    return jwt.encode(payload, JWT_SECRET_KEY, algorithm="HS256")
 
-async def db_get_conversations(user_id: str):
-    cursor = conversations_coll.find({"user_id": ObjectId(user_id)}).sort("created_at", -1)
-    return await cursor.to_list(length=100)
-
-async def db_get_messages(conv_id: str):
-    conv = await conversations_coll.find_one({"_id": ObjectId(conv_id)})
-    return conv.get("messages", []) if conv else []
-
-async def db_save_message(conv_id: str, msg: dict):
-    await conversations_coll.update_one(
-        {"_id": ObjectId(conv_id)},
-        {"$push": {"messages": msg}}
-    )
-
-
-# ==============================================================================
-# ۳. ماژول احراز هویت (بدون تغییر)
-# ==============================================================================
-def hash_password(password: str): return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-def verify_password(password: str, hashed: str): return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+def decode_jwt_token(token: str):
+    try:
+        return jwt.decode(token, JWT_SECRET_KEY, algorithms=["HS256"])
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
 
 def initialize_session():
-    defaults = {
-        'authenticated': False, 'user_info': None, 'page': 'login',
-        'messages': [], 'conversations': [], 'current_conv_id': None
-    }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-
-def login_user(user_info):
-    st.session_state.authenticated = True
-    st.session_state.user_info = {"id": str(user_info["_id"]), "name": user_info["name"], "email": user_info["email"]}
-    st.session_state.page = 'dashboard'
+    if 'token' not in st.session_state: st.session_state.token = None
+    if 'page' not in st.session_state: st.session_state.page = 'login'
+    # ... سایر مقادیر اولیه
 
 def logout_user():
-    initialize_session() # Reset all session state keys to default
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
     st.toast("با موفقیت خارج شدید!", icon="👋")
 
+# ==============================================================================
+# ۴. فاز ۲.۱: ماژول مدل‌های هوش مصنوعی (AI Models Module)
+# ==============================================================================
 
-# ==============================================================================
-# ۴. ماژول مدل‌های هوش مصنوعی (جدید)
-# ==============================================================================
-@st.cache_data
-def get_models_config():
-    return {
-        "چت متنی": {
-            "Gemini 1.5 Flash": {"id": "gemini-1.5-flash-latest", "capabilities": "سرعت بالا و کارایی بهینه برای چت"},
-            "Gemini 1.5 Pro": {"id": "gemini-1.5-pro-latest", "capabilities": "پیشرفته‌ترین مدل برای تحلیل‌های پیچیده"},
-        },
-        "تولید تصویر (شبیه‌سازی شده)": {
-            "Imagen 3": {"id": "imagen-3-placeholder", "capabilities": "تولید تصاویر با کیفیت بالا"},
-        }
+MODELS = {
+    "چت متنی": {
+        "Gemini 1.5 Pro": {"id": "gemini-1.5-pro-latest", "RPM": 5, "RPD": 100, "capabilities": "چت و پاسخ متن"},
+        "Gemini 1.5 Flash": {"id": "gemini-1.5-flash-latest", "RPM": 10, "RPD": 250, "capabilities": "چت سریع"},
+    },
+    "تولید تصویر": {
+        "Imagen 3 (Placeholder)": {"id": "imagen-3", "RPM": 10, "RPD": 100, "capabilities": "تولید تصویر"},
+    },
+    "تولید ویدیو": {
+        "Veo (Placeholder)": {"id": "veo-3", "RPM": 5, "RPD": 50, "capabilities": "تولید ویدیو"},
     }
-MODELS = get_models_config()
+}
 
-async def stream_gemini_response(api_msgs, model_id):
+async def stream_gemini_response(history, model_id):
     try:
         model = genai.GenerativeModel(model_id)
-        response_stream = await model.generate_content_async(api_msgs, stream=True)
+        api_history = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in history if m["type"]=="text"]
+        response_stream = await model.generate_content_async(api_history, stream=True)
         async for chunk in response_stream:
-            if chunk.text:
-                yield chunk.text
-    except GoogleAPICallError as e:
-        yield f"**خطای API:** `{e.message}`. لطفاً کلید API خود را بررسی کنید."
+            if chunk.text: yield chunk.text
     except Exception as e:
-        logging.error(f"Gemini streaming error: {e}", exc_info=True)
-        yield "**خطای ناشناخته:** مشکلی در پردازش درخواست رخ داد."
+        yield f"**خطا در ارتباط با API:** `{str(e)}`"
 
-async def generate_media(prompt, model_id):
-    # این تابع شبیه‌سازی شده است. در یک پروژه واقعی، کد اتصال به API تولید تصویر در اینجا قرار می‌گیرد.
-    await asyncio.sleep(2) # شبیه‌سازی تاخیر شبکه
+async def generate_media(prompt: str, model_id: str):
+    await asyncio.sleep(2) # شبیه‌سازی تاخیر API
     return f"https://picsum.photos/seed/{uuid.uuid4().hex[:10]}/1024/768"
 
-
 # ==============================================================================
-# ۵. تعریف صفحات برنامه
+# ۵. رندر صفحات برنامه (Page Renderers)
 # ==============================================================================
 
-def render_login_page():
-    st.set_page_config(page_title="ورود", page_icon="🔐")
+async def render_login_page():
     st.title("به پلتفرم هوشمند Jarvis Elite خوش آمدید 👑")
     tab1, tab2 = st.tabs(["**ورود**", "**ثبت‌نام**"])
     with tab1:
         with st.form("login"):
-            email, password = st.text_input("ایمیل"), st.text_input("رمز", type="password")
+            email = st.text_input("ایمیل")
+            password = st.text_input("رمز عبور", type="password")
             if st.form_submit_button("ورود", type="primary", use_container_width=True):
-                user = asyncio.run(get_user_by_email(email))
-                if user and verify_password(password, user["password"]): login_user(user); st.rerun()
-                else: st.error("ایمیل یا رمز عبور اشتباه است.")
+                user = await get_user_by_email(email)
+                if user and verify_password(password, user["password"]):
+                    user_info = {"id": str(user["_id"]), "name": user["name"], "email": user["email"]}
+                    st.session_state.token = create_jwt_token(user_info)
+                    st.session_state.page = 'dashboard'
+                    st.rerun()
+                else:
+                    st.error("ایمیل یا رمز عبور اشتباه است.")
     with tab2:
         with st.form("signup"):
-            name, email = st.text_input("نام"), st.text_input("ایمیل", key="signup_email")
-            p1, p2 = st.text_input("رمز", type="password"), st.text_input("تکرار رمز", type="password")
+            name = st.text_input("نام کامل")
+            email = st.text_input("ایمیل", key="s_email")
+            p1 = st.text_input("رمز عبور", type="password", key="s_p1")
+            p2 = st.text_input("تکرار رمز عبور", type="password", key="s_p2")
             if st.form_submit_button("ثبت‌نام", use_container_width=True):
-                if p1 != p2: st.error("رمزها مطابقت ندارند."); return
-                if asyncio.run(get_user_by_email(email)): st.error("این ایمیل قبلاً ثبت شده."); return
-                asyncio.run(create_user(name, email, hash_password(p1)))
-                st.success("ثبت‌نام موفق بود! اکنون وارد شوید."); time.sleep(2); st.rerun()
+                if p1 != p2: st.error("رمزهای عبور مطابقت ندارند."); return
+                if await get_user_by_email(email): st.error("این ایمیل قبلاً ثبت شده."); return
+                await users_coll.insert_one({"name": name, "email": email, "password": hash_password(p1)})
+                st.success("ثبت‌نام موفق بود! اکنون وارد شوید."); time.sleep(1)
 
-async def render_dashboard_page():
-    st.set_page_config(page_title="چت‌باکس هوشمند", page_icon="💬", initial_sidebar_state="auto")
-    user_id = st.session_state.user_info["id"]
+async def render_dashboard_page(user_info: dict):
+    user_id = user_info["sub"]
+
+    # --- مقداردهی اولیه وضعیت چت ---
+    if "current_conv_id" not in st.session_state: st.session_state.current_conv_id = None
+    if "messages" not in st.session_state: st.session_state.messages = []
 
     # --- سایدبار و مدیریت مکالمات ---
     with st.sidebar:
-        st.header(f"کاربر: {st.session_state.user_info['name']}")
+        st.header(f"کاربر: {user_info['name']}")
         if st.button("➕ مکالمه جدید", use_container_width=True, type="primary"):
             st.session_state.current_conv_id = None
             st.session_state.messages = []
             st.rerun()
-
         st.markdown("---")
         st.subheader("تاریخچه مکالمات")
-        st.session_state.conversations = await db_get_conversations(user_id)
-        for conv in st.session_state.conversations:
+        
+        # فاز ۲.۳: کش کردن لیست مکالمات
+        @st.cache_data(ttl=60)
+        async def get_conversations(uid):
+            cursor = conversations_coll.find({"user_id": ObjectId(uid)}).sort("created_at", -1)
+            return await cursor.to_list(length=100)
+
+        conversations = await get_conversations(user_id)
+        for conv in conversations:
             conv_id_str = str(conv['_id'])
             if st.button(conv['title'][:30], key=conv_id_str, use_container_width=True,
                           type="secondary" if conv_id_str != st.session_state.current_conv_id else "primary"):
                 st.session_state.current_conv_id = conv_id_str
-                st.session_state.messages = await db_get_messages(conv_id_str)
+                conv_data = await conversations_coll.find_one({"_id": ObjectId(conv_id_str)})
+                st.session_state.messages = conv_data.get("messages", [])
                 st.rerun()
         
         st.markdown("---")
@@ -209,89 +232,78 @@ async def render_dashboard_page():
         if st.button("خروج از حساب", use_container_width=True): logout_user(); st.rerun()
 
     # --- هدر و انتخاب مدل ---
-    current_title = next((c['title'] for c in st.session_state.conversations if str(c['_id']) == st.session_state.current_conv_id), "مکالمه جدید")
-    st.header(f"💬 {current_title}")
+    title = next((c['title'] for c in conversations if str(c['_id']) == st.session_state.current_conv_id), "مکالمه جدید")
+    st.header(f"💬 {title}")
     
     col1, col2 = st.columns([2, 1])
-    with col1:
-        model_category = st.selectbox("نوع مدل:", list(MODELS.keys()))
-    with col2:
-        selected_model_name = st.selectbox("انتخاب مدل:", list(MODELS[model_category].keys()))
-        technical_model_id = MODELS[model_category][selected_model_name]["id"]
+    with col1: model_cat = st.selectbox("نوع مدل:", list(MODELS.keys()))
+    with col2: model_name = st.selectbox("انتخاب مدل:", list(MODELS[model_cat].keys()))
+    model_id = MODELS[model_cat][model_name]["id"]
 
     # --- نمایش تاریخچه چت ---
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
-            if msg.get("type") == "image":
-                st.image(msg["content"], caption="تصویر تولید شده")
-            else:
-                st.markdown(msg["content"])
+            if msg.get("type") == "image": st.image(msg["content"])
+            else: st.markdown(msg["content"])
 
-    # --- ورودی کاربر و مدیریت پیام ---
+    # --- ورودی کاربر ---
     if prompt := st.chat_input("پیام خود را بنویسید..."):
-        # اگر مکالمه جدید است، آن را در دیتابیس ایجاد کن
         conv_id = st.session_state.current_conv_id
         if not conv_id:
-            conv_id = await db_create_conversation(user_id, prompt[:40])
+            new_conv = {"user_id": ObjectId(user_id), "title": prompt[:40], "created_at": datetime.now(timezone.utc), "messages": []}
+            result = await conversations_coll.insert_one(new_conv)
+            conv_id = str(result.inserted_id)
             st.session_state.current_conv_id = conv_id
+            st.cache_data.clear() # پاک کردن کش لیست مکالمات
+
+        user_msg = {"role": "user", "content": prompt, "type": "text"}
+        st.session_state.messages.append(user_msg)
+        await conversations_coll.update_one({"_id": ObjectId(conv_id)}, {"$push": {"messages": user_msg}})
         
-        # ذخیره پیام کاربر
-        user_message = {"role": "user", "content": prompt, "type": "text"}
-        st.session_state.messages.append(user_message)
-        await db_save_message(conv_id, user_message)
-        
-        # تولید و ذخیره پاسخ مدل
         with st.chat_message("assistant"):
-            if model_category == "چت متنی":
-                api_history = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in st.session_state.messages if m["type"]=="text"]
-                response_gen = stream_gemini_response(api_history, technical_model_id)
-                full_response = st.write_stream(response_gen)
-                ai_message = {"role": "assistant", "content": full_response, "type": "text"}
-            else: # تولید تصویر
-                with st.spinner("در حال تولید تصویر..."):
-                    media_url = await generate_media(prompt, technical_model_id)
-                    st.image(media_url)
-                    ai_message = {"role": "assistant", "content": media_url, "type": "image"}
+            if "چت" in model_cat:
+                with st.spinner("دستیار در حال فکر کردن است..."):
+                    res_gen = stream_gemini_response(st.session_state.messages, model_id)
+                    full_res = st.write_stream(res_gen)
+                    ai_msg = {"role": "assistant", "content": full_res, "type": "text"}
+            else:
+                with st.spinner("در حال تولید رسانه..."):
+                    url = await generate_media(prompt, model_id)
+                    st.image(url)
+                    ai_msg = {"role": "assistant", "content": url, "type": "image"}
         
-        st.session_state.messages.append(ai_message)
-        await db_save_message(conv_id, ai_message)
+        st.session_state.messages.append(ai_msg)
+        await conversations_coll.update_one({"_id": ObjectId(conv_id)}, {"$push": {"messages": ai_msg}})
         st.rerun()
 
-    # --- جدول اطلاعات مدل‌ها ---
-    with st.expander("ℹ️ اطلاعات مدل‌ها"):
-        model_info = [{"نام مدل": name, "نوع": cat, **data} for cat, group in MODELS.items() for name, data in group.items()]
-        st.dataframe(pd.DataFrame(model_info).drop(columns=['id']), use_container_width=True, hide_index=True)
-
-
-async def render_profile_page():
-    st.set_page_config(page_title="پروفایل", page_icon="👤", initial_sidebar_state="auto")
-    st.sidebar.button("بازگشت به چت", on_click=lambda: st.session_state.update(page='dashboard'), use_container_width=True, type="primary")
-
+async def render_profile_page(user_info: dict):
+    st.sidebar.button("بازگشت به چت", on_click=lambda: st.session_state.update(page='dashboard'), use_container_width=True)
     st.title("👤 پروفایل کاربری")
-    user_info = st.session_state.user_info
-    with st.form("profile_form"):
+    with st.form("profile"):
         name = st.text_input("نام کامل", value=user_info["name"])
         st.text_input("ایمیل", value=user_info["email"], disabled=True)
-        new_password = st.text_input("رمز عبور جدید", type="password", placeholder="برای تغییر، وارد کنید")
-        if st.form_submit_button("ذخیره تغییرات", use_container_width=True, type="primary"):
-            updates = {"name": name}
-            if new_password: updates["password"] = hash_password(new_password)
-            await update_user_profile(user_info["id"], updates)
-            st.session_state.user_info["name"] = name
-            st.success("پروفایل شما با موفقیت به‌روز شد!"); st.balloons()
-
+        if st.form_submit_button("ذخیره تغییرات", type="primary", use_container_width=True):
+            await users_coll.update_one({"_id": ObjectId(user_info["sub"])}, {"$set": {"name": name}})
+            st.success("پروفایل با موفقیت به‌روز شد!")
+            st.balloons()
+            # فاز ۳.۱: بازسازی توکن برای نمایش نام جدید
+            user_info["name"] = name
+            st.session_state.token = create_jwt_token(user_info)
+            time.sleep(1); st.rerun()
 
 # ==============================================================================
-# ۶. روتر اصلی برنامه
+# ۶. فاز ۱.۱: روتر اصلی برنامه (Main Application Router)
 # ==============================================================================
 async def main():
     initialize_session()
-    if not st.session_state.authenticated:
-        render_login_page()
+    user_info = decode_jwt_token(st.session_state.token)
+
+    if not user_info:
+        await render_login_page()
     elif st.session_state.page == 'dashboard':
-        await render_dashboard_page()
+        await render_dashboard_page(user_info)
     elif st.session_state.page == 'profile':
-        await render_profile_page()
+        await render_profile_page(user_info)
 
 if __name__ == "__main__":
     asyncio.run(main())
