@@ -6,3 +6,4 @@ pandas
 google-generativeai
 jwt
 pyjwt
+python-dotenv
