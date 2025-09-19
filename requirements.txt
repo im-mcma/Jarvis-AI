@@ -4,3 +4,4 @@ python-dotenv
 google-generativeai 
 pandas 
 aiohttp
+tavily-python
