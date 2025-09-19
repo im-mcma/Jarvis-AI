@@ -1,0 +1,7 @@
+/* Custom background for Argus Nova */
+.main-container {
+    background-image: url('/public/background.jpg') !important;
+    background-size: cover !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+}
