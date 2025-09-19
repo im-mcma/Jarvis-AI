@@ -1,3 +1,2 @@
-markdown
-    [chainlit]
-    custom_css = "/public/custom.css
+[chainlit]
+custom_css = "/public/custom.css"
