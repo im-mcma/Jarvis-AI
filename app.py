@@ -1,6 +1,13 @@
 #==============================================================================
-# ۱. فاز ۱.۳: پیکربندی و استایل (Config & Styling)
+# Jarvis: Senpai — Refactored single-file Streamlit app (synchronous)
 #==============================================================================
+"""
+Usage:
+  - Set environment variables: MONGO_URI, JWT_SECRET_KEY, (optional) GEMINI_API_KEY
+  - Install requirements (example): pip install streamlit pymongo bcrypt pyjwt google-generative-ai python-dotenv pandas
+  - Run: streamlit run app.py
+"""
+
 import os
 import uuid
 import time
@@ -17,48 +24,46 @@ from bson import ObjectId
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-# Load local .env for development (optional)
-load_dotenv()
+#==============================================================================
+# ۱. پیکربندی اولیه و بارگذاری ENV
+#==============================================================================
+load_dotenv()  # optional for local dev
 
-# Basic logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("jarvis-senpai")
 
-# App identity
 APP_NICKNAME = "Jarvis: Senpai"
 APP_TITLE = f"{APP_NICKNAME} — دستیار هوشمند"
 PAGE_SIZE_MESSAGES = 50
 MIN_SECONDS_BETWEEN_PROMPTS = 0.6
 
-#==============================================================================
-# ۲. فاز ۱.۲: متغیرهای محیطی (Env) — از env خوانده می‌شوند
-#==============================================================================
-def require_env(k: str) -> str:
-    v = os.environ.get(k)
+def require_env(key: str) -> str:
+    v = os.environ.get(key)
     if not v:
-        raise RuntimeError(f"Environment variable `{k}` is required but not set.")
+        raise RuntimeError(f"Environment variable `{key}` is required but not set.")
     return v
 
+# Required envs
 try:
     MONGO_URI = require_env("MONGO_URI")
-    GEMINI_API_KEY = require_env("GEMINI_API_KEY")
     JWT_SECRET_KEY = require_env("JWT_SECRET_KEY")
 except Exception as e:
-    # If env missing, show error in Streamlit and stop.
     st.set_page_config(page_title="Config error", layout="centered")
-    st.error(f"تنظیمات محیطی ناقص است: {e}")
+    st.error(f"تنظیمات محیطی ناقص: {e}")
     st.stop()
 
-# Configure genai (best-effort; errors caught at call time)
-try:
-    genai.configure(api_key=GEMINI_API_KEY)
-except Exception as e:
-    logger.warning("genai.configure warning: %s", e)
+# Optional Gemini API key
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+    except Exception as e:
+        logger.warning("genai.configure warning: %s", e)
 
 #==============================================================================
-# ۳. فاز ۲.۱: لیست MODELS (همان لیست کامل مورد نظر شما)
+# ۲. MODELS — کامل و طبق درخواست شما
 #==============================================================================
-MODELS = {
+MODELS: Dict[str, Dict[str, Dict[str, Any]]] = {
     "چت متنی": {
         "Gemini 2.5 Pro": {"id": "gemini-2.5-pro", "RPM": 5, "RPD": 100, "capabilities": "استدلال و پاسخ‌گویی پیچیده"},
         "Gemini 2.5 Flash": {"id": "gemini-2.5-flash", "RPM": 10, "RPD": 250, "capabilities": "متعادل: سرعت و دقت"},
@@ -76,28 +81,23 @@ MODELS = {
 }
 
 #==============================================================================
-# ۴. فاز ۲.۲: استایل صفحه و پیکربندی Streamlit
+# ۳. استایل صفحه و کانفیگ Streamlit
 #==============================================================================
 st.set_page_config(page_title=APP_TITLE, layout="wide", initial_sidebar_state="collapsed", page_icon="😺")
-st.markdown(
-    """
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700&display=swap');
-    html, body, [class*="st-"] { font-family: 'Vazirmatn', sans-serif; direction: rtl; }
-    .header-row { display:flex; align-items:center; gap:12px; }
-    .app-badge { background:#ff6b6b; color:white; padding:6px 10px; border-radius:999px; font-weight:700; }
-    .stChatMessage { border-radius: 12px; border: 1px solid #374151; background-color: #0b1220; margin-bottom: 1rem; padding:8px; }
-    .stChatMessage:has(div[data-testid="stChatMessageContent.user"]) { background-color:#063983; color:white; }
-    .model-card { background:#0f1724; border:1px solid #1f2937; padding:10px; border-radius:10px; margin-bottom:8px; }
-    .badge { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; margin-left:6px; }
-    .rpm { background:#063f7a; color:#fff; } .rpd { background:#6b21a8; color:#fff; } .cap { background:#064e3b; color:#fff; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700&display=swap');
+html, body, [class*="st-"] { font-family: 'Vazirmatn', sans-serif; direction: rtl; }
+.stChatMessage { border-radius: 12px; border: 1px solid #374151; background-color: #0b1220; margin-bottom: 1rem; padding:8px; }
+.stChatMessage:has(div[data-testid="stChatMessageContent.user"]) { background-color:#063983; color:white; }
+.model-card { background:#0f1724; border:1px solid #1f2937; padding:10px; border-radius:10px; margin-bottom:8px; }
+.badge { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; margin-left:6px; }
+.rpm { background:#063f7a; color:#fff; } .rpd { background:#6b21a8; color:#fff; } .cap { background:#064e3b; color:#fff; }
+</style>
+""", unsafe_allow_html=True)
 
 #==============================================================================
-# ۵. فاز ۳.۱: توابع کمکی احراز هویت (bcrypt + jwt)
+# ۴. توابع امنیتی: bcrypt + JWT
 #==============================================================================
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -124,14 +124,14 @@ def decode_jwt_token(token: str) -> Optional[dict]:
     try:
         return jwt.decode(token, JWT_SECRET_KEY, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
-        st.warning("نشست شما منقضی شده است. لطفاً دوباره وارد شوید.")
+        st.warning("نشست شما منقضی شده است — لطفاً دوباره وارد شوید.")
         return None
     except Exception as e:
         logger.warning("Invalid JWT: %s", e)
         return None
 
 #==============================================================================
-# ۶. فاز ۴.۱: پایگاه داده — pymongo (همگرا / synchronous) — ایمن و ساده
+# ۵. پایگاه داده (pymongo synchronous) — ساده و قابل اتکا
 #==============================================================================
 client = MongoClient(MONGO_URI)
 db = client["jarvis_senpai_db"]
@@ -165,8 +165,7 @@ def db_get_messages_sync(conv_id: str, limit: int = PAGE_SIZE_MESSAGES, offset: 
     msgs = doc.get("messages", []) or []
     start = max(0, len(msgs) - (offset + limit))
     end = len(msgs) - offset
-    sliced = msgs[start:end]
-    return sliced
+    return msgs[start:end]
 
 def db_append_message_sync(conv_id: str, msg: dict):
     conversations_coll.update_one({"_id": ObjectId(conv_id)}, {"$push": {"messages": msg}})
@@ -175,22 +174,16 @@ def db_update_user_name_sync(user_id: str, name: str):
     users_coll.update_one({"_id": ObjectId(user_id)}, {"$set": {"name": name}})
 
 #==============================================================================
-# ۷. فاز ۴.۲: تعامل با Gemini (سینک، قابل-انعطاف برای نسخه‌های SDK مختلف)
+# ۶. فراخوانی Gemini — sync-friendly با fallback به async اگر لازم بود
 #==============================================================================
 def call_gemini_sync(api_history: List[Dict[str, Any]], model_id: str) -> str:
-    """
-    فراخوانی همزمان Gemini با تلاش برای پشتیبانی از چند نسخهٔ SDK.
-    api_history: لیستی از پیام‌ها با فرم {'role': 'user'/'model', 'parts': [{'text': ...}]}
-    model_id: شناسهٔ مدل از MODELS
-    """
     if not GEMINI_API_KEY:
         return "**خطا: کلید API گوگل تنظیم نشده است.**"
     try:
         model = genai.GenerativeModel(model_id)
-        # برخی نسخه‌های SDK متد sync دارند
+        # try sync method if available
         if hasattr(model, "generate_content"):
             try:
-                # بعضی SDKها signature متفاوت دارند؛ سعی می‌کنیم چند تا را امتحان کنیم
                 try:
                     resp = model.generate_content({"messages": api_history})
                 except Exception:
@@ -198,7 +191,6 @@ def call_gemini_sync(api_history: List[Dict[str, Any]], model_id: str) -> str:
             except Exception as e:
                 logger.exception("generate_content (sync) failed: %s", e)
                 return f"**خطا در فراخوانی مدل (sync):** {e}"
-            # استخراج متن از پاسخ بر حسب شکل‌های معمول
             if getattr(resp, "text", None):
                 return resp.text
             if getattr(resp, "candidates", None):
@@ -212,7 +204,7 @@ def call_gemini_sync(api_history: List[Dict[str, Any]], model_id: str) -> str:
                     return text
             return str(resp)
         else:
-            # fallback: بعضی SDKها فقط async دارند — در این حالت با asyncio.run فرخوانی می‌کنیم
+            # fallback async path (safely run a fresh loop)
             async def _call_async():
                 model_async = genai.GenerativeModel(model_id)
                 stream = await model_async.generate_content_async(api_history, stream=False)
@@ -228,8 +220,7 @@ def call_gemini_sync(api_history: List[Dict[str, Any]], model_id: str) -> str:
                     return text or str(stream)
                 return str(stream)
             try:
-                # run a fresh event loop for this single call (safe in sync app)
-                return asyncio.run(_call_async())
+                return __import__("asyncio").run(_call_async())
             except Exception as e:
                 logger.exception("generate_content_async fallback failed: %s", e)
                 return f"**خطای async fallback:** {e}"
@@ -238,21 +229,16 @@ def call_gemini_sync(api_history: List[Dict[str, Any]], model_id: str) -> str:
         return f"**خطا در آماده‌سازی مدل:** {e}"
 
 def generate_media_sync(prompt: str, model_id: str) -> str:
-    """
-    Placeholder: تولید تصویر/ویدیو. اگر API واقعی تولید تصویر/ویدیو را دارید این تابع را جایگزین کنید.
-    """
-    # تصویر تصادفی
+    # placeholder media generation — replace with real Gemini Image/Video API if available
     if "image" in model_id.lower() or "imagen" in model_id.lower():
         seed = uuid.uuid4().hex[:10]
         return f"https://picsum.photos/seed/{seed}/1024/768"
-    # ویدیو نمونه
     if "veo" in model_id.lower() or "video" in model_id.lower():
         return "https://www.w3schools.com/html/mov_bbb.mp4"
-    # fallback
     return f"https://picsum.photos/seed/{uuid.uuid4().hex[:10]}/1024/768"
 
 #==============================================================================
-# ۸. فاز ۵.۱: کلاس اپلیکیشن (سینک، یک فایل)
+# ۷. اپلیکیشن اصلی — JarvisSenpaiApp
 #==============================================================================
 class JarvisSenpaiApp:
     def __init__(self):
@@ -275,7 +261,7 @@ class JarvisSenpaiApp:
             if k not in st.session_state:
                 st.session_state[k] = v
 
-    # ---------- نمایش مدل‌ها ----------
+    # نمایش مدل‌ها
     def render_models_info(self):
         st.markdown("### 🔎 مدل‌های در دسترس")
         for cat, group in MODELS.items():
@@ -297,7 +283,6 @@ class JarvisSenpaiApp:
                     """, unsafe_allow_html=True)
                 i += 1
         st.markdown("---")
-        # جدول
         rows = {"نام مدل": [], "دسته": [], "capabilities": [], "RPM": [], "RPD": [], "model_id": []}
         for cat, g in MODELS.items():
             for n, inf in g.items():
@@ -309,7 +294,7 @@ class JarvisSenpaiApp:
                 rows["model_id"].append(inf["id"])
         st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
-    # ---------- ورود / ثبت‌نام ----------
+    # صفحهٔ ورود/ثبت‌نام
     def render_login_signup(self):
         st.title(f"{APP_NICKNAME} — ورود / ثبت‌نام")
         col1, col2 = st.columns([3, 1])
@@ -324,8 +309,8 @@ class JarvisSenpaiApp:
                             st.error("ایمیل و رمز را وارد کنید.")
                         else:
                             user = db_get_user_by_email_sync(email)
-                            if user and verify_password(pwd, user.get("password","")):
-                                info = {"id": str(user["_id"]), "name": user.get("name","کاربر"), "email": user["email"]}
+                            if user and verify_password(pwd, user.get("password", "")):
+                                info = {"id": str(user["_id"]), "name": user.get("name", "کاربر"), "email": user["email"]}
                                 st.session_state.token = create_jwt_token(info)
                                 st.session_state.page = "dashboard"
                                 st.session_state.initialized = False
@@ -354,12 +339,12 @@ class JarvisSenpaiApp:
         with col2:
             st.markdown(f"### 👋 خوش آمدید به {APP_NICKNAME}")
             st.markdown("- پیکربندی از متغیرهای محیطی خوانده می‌شود.")
-            st.markdown("- از Gemini برای تولید متن/تصویر استفاده می‌شود (در صورت دسترسی API).")
+            st.markdown("- مدل‌ها: چت متنی، تولید تصویر و تولید ویدیو.")
 
-    # ---------- سایدبار ----------
+    # سایدبار
     def render_sidebar(self, user_payload: dict):
         with st.sidebar:
-            st.header(f"👤 {user_payload.get('name','کاربر')}")
+            st.header(f"👤 {user_payload.get('name', 'کاربر')}")
             if st.button("➕ مکالمه جدید", use_container_width=True):
                 st.session_state.current_conv_id = None
                 st.session_state.messages = []
@@ -372,7 +357,7 @@ class JarvisSenpaiApp:
                 st.session_state.conversations_list = convs
                 for c in convs:
                     cid = str(c["_id"])
-                    label = c.get("title","بدون عنوان")[:30]
+                    label = c.get("title", "بدون عنوان")[:30]
                     is_active = cid == st.session_state.current_conv_id
                     if st.button(f"{'🔹 ' if is_active else ''}{label}", key=f"conv_{cid}", use_container_width=True):
                         if not is_active:
@@ -391,7 +376,7 @@ class JarvisSenpaiApp:
                 st.session_state.clear()
                 st.experimental_rerun()
 
-    # ---------- داشبورد ----------
+    # داشبورد
     def render_dashboard(self, user_payload: dict):
         self.render_sidebar(user_payload)
         st.header(f"💬 گفتگوی هوشمند — {APP_NICKNAME}")
@@ -410,7 +395,7 @@ class JarvisSenpaiApp:
 
         st.markdown("---")
 
-        # load messages for active conversation
+        # load messages if needed
         if st.session_state.current_conv_id and not st.session_state.messages:
             st.session_state.messages = db_get_messages_sync(st.session_state.current_conv_id, PAGE_SIZE_MESSAGES, 0)
 
@@ -433,7 +418,7 @@ class JarvisSenpaiApp:
                 else:
                     st.markdown(m["content"])
 
-        # input form
+        # ورودی کاربر
         with st.form("chat_input_form", clear_on_submit=True):
             user_prompt = st.text_input("پیام خود را بنویسید...", key="user_prompt")
             submit = st.form_submit_button("ارسال")
@@ -450,7 +435,7 @@ class JarvisSenpaiApp:
         with st.expander("ℹ️ اطلاعات مدل‌ها و قابلیت‌ها — جمع‌وجور"):
             self.render_models_info()
 
-    # ---------- پردازش ورودی کاربر ----------
+    # پردازش پیام کاربر
     def process_chat_input(self, prompt: str, model_id: str, user_payload: dict):
         try:
             user_id = user_payload["sub"]
@@ -475,7 +460,6 @@ class JarvisSenpaiApp:
                         st.video(media_url)
                     st.session_state.last_media = media_url
                 else:
-                    # prepare api history in SDK-friendly shape
                     text_history = [m for m in st.session_state.messages if m.get("type", "text") == "text"]
                     api_history = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in text_history]
                     full_text = call_gemini_sync(api_history, model_id)
@@ -490,7 +474,7 @@ class JarvisSenpaiApp:
             logger.exception("Error in process_chat_input: %s", e)
             st.error(f"خطا در پردازش پیام: {e}")
 
-    # ---------- پروفایل ----------
+    # صفحهٔ پروفایل
     def render_profile(self, user_payload: dict):
         self.render_sidebar(user_payload)
         st.title("👤 پروفایل شما")
@@ -509,7 +493,7 @@ class JarvisSenpaiApp:
                     logger.exception("Profile update error: %s", e)
                     st.error("خطا در بروزرسانی پروفایل.")
 
-    # ---------- Router ----------
+    # Router
     def run(self):
         self._init_session_state()
         token = st.session_state.get("token")
@@ -519,12 +503,11 @@ class JarvisSenpaiApp:
             self.render_login_signup()
             return
 
-        # load convs once
         if not st.session_state.get("initialized", False):
             try:
                 st.session_state.conversations_list = db_get_conversations_sync(user_payload["sub"])
             except Exception as e:
-                logger.exception("Error loading conversations: %s", e)
+                logger.exception("Error loading convs: %s", e)
             st.session_state.initialized = True
 
         page = st.session_state.get("page", "dashboard")
@@ -536,7 +519,7 @@ class JarvisSenpaiApp:
             st.error("صفحهٔ نامعتبر")
 
 #==============================================================================
-# ۹. فاز ۶.۱: اجرای اپ
+# ۸. اجرای اپ
 #==============================================================================
 if __name__ == "__main__":
     app = JarvisSenpaiApp()
