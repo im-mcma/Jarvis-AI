@@ -1,6 +1,0 @@
-[features]
-# Disables the creation of translation files
-translations = false
-
-# Disables telemetry
-telemetry = false
