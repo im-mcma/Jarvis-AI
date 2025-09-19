@@ -8,7 +8,7 @@ import logging
 import nest_asyncio
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 
 import streamlit as st
 import pandas as pd
@@ -19,21 +19,19 @@ from bson import ObjectId
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-# apply nest_asyncio early to avoid "Event loop is closed" in Streamlit environments
+# apply nest_asyncio early
 nest_asyncio.apply()
 LOOP = asyncio.get_event_loop()
 
-# ---------- basic logging ----------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("jarvis-senpai")
 
-# load .env for local dev (safe to call even if no .env)
 load_dotenv()
 
 #==============================================================================
 # ۲. فاز ۱.۲: تنظیمات محیطی و ثابت‌ها (Env & Constants)
 #==============================================================================
-APP_NICKNAME = "Jarvis: Senpai"  # لقبی فان/انیمه‌طور
+APP_NICKNAME = "Jarvis: Senpai"
 APP_TITLE = f"{APP_NICKNAME} — هوش مصنوعی"
 PAGE_SIZE_MESSAGES = 50
 MIN_SECONDS_BETWEEN_PROMPTS = 0.6
@@ -48,7 +46,6 @@ MONGO_URI = get_env_var("MONGO_URI")
 GEMINI_API_KEY = get_env_var("GEMINI_API_KEY")
 JWT_SECRET_KEY = get_env_var("JWT_SECRET_KEY")
 
-# configure genai (best-effort; errors handled later)
 try:
     genai.configure(api_key=GEMINI_API_KEY)
 except Exception as e:
@@ -98,23 +95,23 @@ html, body, [class*="st-"] {{ font-family: 'Vazirmatn', sans-serif; direction: r
 #==============================================================================
 # ۵. فاز ۳.۱: ابزار کمکی (helpers)
 #==============================================================================
-def run_async(coro):
-    """Helper: run coroutine in global loop (nest_asyncio applied)."""
+def run_async(func: Callable, *args, **kwargs):
+    """
+    Run an async function in the global LOOP and return its result.
+    IMPORTANT: callers must pass the coroutine *function* and args, NOT a coroutine object.
+    Example: run_async(db_get_user_by_email, email)
+    """
+    if not callable(func):
+        raise ValueError("run_async expects a callable coroutine function as first argument.")
     try:
-        return LOOP.run_until_complete(coro)
-    except RuntimeError as e:
-        # fallback: create temporary loop (shouldn't normally happen because of nest_asyncio)
-        new_loop = asyncio.new_event_loop()
-        try:
-            return new_loop.run_until_complete(coro)
-        finally:
-            new_loop.close()
+        return LOOP.run_until_complete(func(*args, **kwargs))
+    except Exception as e:
+        # log and re-raise for visibility
+        logger.exception("run_async error: %s", e)
+        raise
 
 def now_ts():
     return time.time()
-
-def safe_str(s) -> str:
-    return "" if s is None else str(s)
 
 #==============================================================================
 # ۶. فاز ۳.۲: auth helpers (bcrypt + jwt)
@@ -195,54 +192,49 @@ async def db_get_messages(conv_id: str, limit: int = PAGE_SIZE_MESSAGES, offset:
 async def db_append_message(conv_id: str, msg: dict):
     await CONV_COLL.update_one({"_id": ObjectId(conv_id)}, {"$push": {"messages": msg}})
 
+async def db_update_user_name(user_id: str, name: str):
+    await USERS_COLL.update_one({"_id": ObjectId(user_id)}, {"$set": {"name": name}})
+
 #==============================================================================
 # ۸. فاز ۴.۲: Gemini interaction (sync-friendly)
 #==============================================================================
 def call_gemini_sync(api_history: List[Dict[str, Any]], model_id: str) -> str:
     """
     Call genai synchronously (best-effort):
-    - prefer sync generate_content if available on SDK
-    - otherwise attempt to use async via run_async and collect text
-    Returns the aggregated text response.
+    - try sync .generate_content if available
+    - otherwise run an async call via run_async on a fresh coroutine
     """
     try:
-        # try sync first (some SDK versions provide .generate_content)
         model = genai.GenerativeModel(model_id)
         if hasattr(model, "generate_content"):
-            # build request shape expected by SDK (may vary by SDK version)
             try:
-                resp = model.generate_content({"messages": api_history})  # some SDK variants
+                resp = model.generate_content({"messages": api_history})
             except Exception:
-                # alternative call signature
+                # fallback signature
                 resp = model.generate_content(api_history)
-            # parse response: try common fields
             text = ""
-            if hasattr(resp, "text") and resp.text:
+            if getattr(resp, "text", None):
                 text = resp.text
             else:
-                # attempt to read structured fields
-                try:
-                    # fallback: resp.candidates[0].content[0].text or similar shapes
-                    if getattr(resp, "candidates", None):
-                        cand = resp.candidates[0]
-                        if getattr(cand, "content", None):
-                            for p in cand.content:
-                                if getattr(p, "text", None):
-                                    text += p.text
-                except Exception:
-                    text = str(resp)
+                # try common nested structures
+                if getattr(resp, "candidates", None):
+                    try:
+                        for cand in resp.candidates:
+                            if getattr(cand, "content", None):
+                                for p in cand.content:
+                                    if getattr(p, "text", None):
+                                        text += p.text
+                    except Exception:
+                        text = str(resp)
             return text or str(resp)
         else:
-            # fallback: attempt async generate_content_async and run it (no streaming)
             async def _call():
                 model_async = genai.GenerativeModel(model_id)
                 stream = await model_async.generate_content_async(api_history, stream=False)
-                # stream may be an object with text or candidates
                 text_acc = ""
                 if getattr(stream, "text", None):
                     text_acc += stream.text
                 else:
-                    # check candidates
                     if getattr(stream, "candidates", None):
                         for c in stream.candidates:
                             if getattr(c, "content", None):
@@ -250,7 +242,8 @@ def call_gemini_sync(api_history: List[Dict[str, Any]], model_id: str) -> str:
                                     if getattr(p, "text", None):
                                         text_acc += p.text
                 return text_acc or str(stream)
-            return run_async(_call())
+            # IMPORTANT: pass coroutine function to run_async (not the coroutine object)
+            return run_async(_call)
     except Exception as e:
         logger.exception("call_gemini_sync error")
         return f"**خطا در فراخوانی Gemini:** {e}"
@@ -279,7 +272,6 @@ class JarvisSenpai:
             if k not in st.session_state:
                 st.session_state[k] = v
 
-    # ---------- UI: models info ----------
     def render_models_info_compact(self):
         st.markdown("### 🔎 مدل‌های در دسترس (جمع‌وجور)")
         for cat, group in MODELS.items():
@@ -313,7 +305,6 @@ class JarvisSenpai:
                 data['model_id'].append(inf['id'])
         st.dataframe(pd.DataFrame(data), use_container_width=True)
 
-    # ---------- render login/signup ----------
     def render_login_signup(self):
         st.title(f"{APP_NICKNAME} — ورود / ثبت‌نام")
         col1, col2 = st.columns([3, 1])
@@ -327,7 +318,8 @@ class JarvisSenpai:
                         if not email or not pwd:
                             st.error("ایمیل و رمز را وارد کنید.")
                         else:
-                            user = run_async(db_get_user_by_email(email))
+                            # pass the function and args to run_async (do NOT pass coroutine object)
+                            user = run_async(db_get_user_by_email, email)
                             if user and verify_password(pwd, user.get("password","")):
                                 payload = {"id": str(user["_id"]), "name": user.get("name","کاربر"), "email": user.get("email","")}
                                 st.session_state.token = create_jwt_token(payload)
@@ -349,10 +341,10 @@ class JarvisSenpai:
                             st.error("رمزها مطابقت ندارند.")
                         elif len(p1) < 6:
                             st.error("رمز باید حداقل ۶ کاراکتر باشد.")
-                        elif run_async(db_get_user_by_email(email2)):
+                        elif run_async(db_get_user_by_email, email2):
                             st.error("این ایمیل قبلاً ثبت شده است.")
                         else:
-                            uid = run_async(db_create_user(name, email2, p1))
+                            uid = run_async(db_create_user, name, email2, p1)
                             st.success("ثبت‌نام موفق — اکنون وارد شوید.")
                             logger.info("User created %s", uid)
         with col2:
@@ -360,7 +352,6 @@ class JarvisSenpai:
             st.markdown("- پیکربندی از متغیرهای محیطی خوانده می‌شود.")
             st.markdown("- مدل‌ها: چت متنی، تولید تصویر و تولید ویدیو (RPM/RPD اطلاع‌رسانی).")
 
-    # ---------- sidebar ----------
     def render_sidebar(self, user_payload: dict):
         with st.sidebar:
             st.header(f"👤 {user_payload.get('name','کاربر')}")
@@ -372,7 +363,7 @@ class JarvisSenpai:
             st.markdown("---")
             st.subheader("تاریخچه مکالمات")
             try:
-                convs = run_async(db_get_conversations(user_payload["sub"]))
+                convs = run_async(db_get_conversations, user_payload["sub"])
                 st.session_state.conversations_list = convs
                 for c in convs:
                     cid = str(c["_id"])
@@ -382,7 +373,7 @@ class JarvisSenpai:
                         if not is_active:
                             st.session_state.current_conv_id = cid
                             st.session_state.messages_offset = 0
-                            st.session_state.messages = run_async(db_get_messages(cid, limit=PAGE_SIZE_MESSAGES, offset=0))
+                            st.session_state.messages = run_async(db_get_messages, cid, PAGE_SIZE_MESSAGES, 0)
                             st.experimental_rerun()
             except Exception as e:
                 logger.exception("Error loading conversations: %s", e)
@@ -395,7 +386,6 @@ class JarvisSenpai:
                 st.session_state.clear()
                 st.experimental_rerun()
 
-    # ---------- dashboard ----------
     def render_dashboard(self, user_payload: dict):
         self.render_sidebar(user_payload)
         st.header(f"💬 گفتگوی هوشمند — {APP_NICKNAME}")
@@ -414,16 +404,15 @@ class JarvisSenpai:
 
         st.markdown("---")
 
-        # load messages on first render for current conv
         if st.session_state.current_conv_id and not st.session_state.messages:
-            st.session_state.messages = run_async(db_get_messages(st.session_state.current_conv_id, limit=PAGE_SIZE_MESSAGES, offset=0))
+            st.session_state.messages = run_async(db_get_messages, st.session_state.current_conv_id, PAGE_SIZE_MESSAGES, 0)
 
         chat_box = st.container()
 
         if st.session_state.current_conv_id:
             if st.button("⤴️ بارگذاری پیام‌های قدیمی‌تر", use_container_width=True):
                 st.session_state.messages_offset = st.session_state.get("messages_offset", 0) + PAGE_SIZE_MESSAGES
-                older = run_async(db_get_messages(st.session_state.current_conv_id, limit=PAGE_SIZE_MESSAGES, offset=st.session_state.messages_offset))
+                older = run_async(db_get_messages, st.session_state.current_conv_id, PAGE_SIZE_MESSAGES, st.session_state.messages_offset)
                 st.session_state.messages = older + st.session_state.messages
                 st.experimental_rerun()
 
@@ -437,7 +426,6 @@ class JarvisSenpai:
                 else:
                     st.markdown(m["content"])
 
-        # input form
         with st.form("chat_input_form", clear_on_submit=True):
             user_prompt = st.text_input("پیام خود را بنویسید...", key="user_prompt")
             submit = st.form_submit_button("ارسال")
@@ -448,32 +436,30 @@ class JarvisSenpai:
                     st.warning("لطفاً چند لحظه صبر کنید.")
                 else:
                     st.session_state.last_prompt_ts = now
-                    # process synchronously by calling async db/genai where needed
+                    # process input (use run_async inside helper)
                     self.process_chat_input(user_prompt, technical_model_id, user_payload)
 
         st.markdown("---")
         with st.expander("ℹ️ اطلاعات مدل‌ها و قابلیت‌ها — جمع‌وجور"):
             self.render_models_info_compact()
 
-    # ---------- process input (sync wrapper) ----------
     def process_chat_input(self, prompt: str, model_id: str, user_payload: dict):
-        """synchronous wrapper that calls async DB operations and genai via sync helper"""
+        """synchronous wrapper using run_async(callable, ...)"""
         try:
             user_id = user_payload["sub"]
             conv_id = st.session_state.current_conv_id
             if not conv_id:
-                conv_id = run_async(db_create_conversation(user_id, prompt[:40] or "مکالمه جدید"))
+                conv_id = run_async(db_create_conversation, user_id, prompt[:40] or "مکالمه جدید")
                 st.session_state.current_conv_id = conv_id
                 st.session_state.messages_offset = 0
 
             user_msg = {"_id": str(uuid.uuid4()), "role": "user", "type": "text", "content": prompt, "ts": datetime.now(timezone.utc)}
             st.session_state.messages.append(user_msg)
-            run_async(db_append_message(conv_id, user_msg))
+            run_async(db_append_message, conv_id, user_msg)
 
             with st.spinner("در حال پردازش..."):
                 if st.session_state.media_mode:
-                    # generate media placeholder
-                    media_url = run_async(self._generate_media_async(prompt, model_id))
+                    media_url = run_async(self._generate_media_async, prompt, model_id)
                     if "image" in model_id.lower() or "imagen" in model_id.lower():
                         ai_msg = {"_id": str(uuid.uuid4()), "role":"assistant", "type":"image", "content":media_url, "ts": datetime.now(timezone.utc)}
                         st.image(media_url)
@@ -482,26 +468,21 @@ class JarvisSenpai:
                         st.video(media_url)
                     st.session_state.last_media = media_url
                 else:
-                    # prepare api_history for Gemini
                     text_history = [m for m in st.session_state.messages if m.get("type","text")=="text"]
                     api_history = [{"role": "user" if m["role"]=="user" else "model", "parts":[{"text": m["content"]}]} for m in text_history]
-                    # call gemini synchronously
                     full_text = call_gemini_sync(api_history, model_id)
-                    # display response
                     st.markdown(full_text)
                     ai_msg = {"_id": str(uuid.uuid4()), "role":"assistant", "type":"text", "content": full_text, "ts": datetime.now(timezone.utc)}
 
                 st.session_state.messages.append(ai_msg)
-                run_async(db_append_message(conv_id, ai_msg))
+                run_async(db_append_message, conv_id, ai_msg)
 
             st.experimental_rerun()
         except Exception as e:
             logger.exception("Error in process_chat_input: %s", e)
             st.error(f"خطا در پردازش پیام: {e}")
 
-    # ---------- media async impl ----------
     async def _generate_media_async(self, prompt: str, model_id: str) -> str:
-        # placeholder: replace with real API call if available
         if "image" in model_id.lower() or "imagen" in model_id.lower():
             await asyncio.sleep(2.2)
             return f"https://picsum.photos/seed/{uuid.uuid4().hex[:10]}/1024/768"
@@ -511,7 +492,6 @@ class JarvisSenpai:
         await asyncio.sleep(2)
         return f"https://picsum.photos/seed/{uuid.uuid4().hex[:10]}/1024/768"
 
-    # ---------- profile ----------
     def render_profile(self, user_payload: dict):
         self.render_sidebar(user_payload)
         st.title("👤 پروفایل شما")
@@ -520,9 +500,8 @@ class JarvisSenpai:
             st.write(f"**ایمیل:** `{user_payload.get('email','')}`")
             if st.form_submit_button("ذخیره"):
                 try:
-                    run_async(USERS_COLL.update_one({"_id": ObjectId(user_payload["sub"])}, {"$set": {"name": name}}))
+                    run_async(db_update_user_name, user_payload["sub"], name)
                     st.success("پروفایل با موفقیت به‌روزرسانی شد.")
-                    # rebuild token with new name (sub field kept same)
                     new_payload = {"id": user_payload["sub"], "name": name, "email": user_payload.get("email","")}
                     st.session_state.token = create_jwt_token(new_payload)
                     time.sleep(0.6)
@@ -531,7 +510,6 @@ class JarvisSenpai:
                     logger.exception("Profile update error: %s", e)
                     st.error("خطا در بروزرسانی پروفایل.")
 
-    # ---------- router ----------
     def run(self):
         self._init_session_state()
         token = st.session_state.get("token")
@@ -541,10 +519,9 @@ class JarvisSenpai:
             self.render_login_signup()
             return
 
-        # load conversations once
         if not st.session_state.get("initialized", False):
             try:
-                st.session_state.conversations_list = run_async(db_get_conversations(user_payload["sub"]))
+                st.session_state.conversations_list = run_async(db_get_conversations, user_payload["sub"])
             except Exception as e:
                 logger.exception("Error loading convs: %s", e)
             st.session_state.initialized = True
