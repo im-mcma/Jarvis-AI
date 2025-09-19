@@ -1,8 +1,12 @@
-# === requirements.txt ===
 chainlit
-pymongo
+motor
+python-dotenv
 bcrypt
 PyJWT
-python-dotenv
 google-generativeai
-uvicorn
+pillow
+aioredis
+rq
+redis
+sentence-transformers
+faiss-cpu
