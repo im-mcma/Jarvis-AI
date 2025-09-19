@@ -5,54 +5,58 @@ import os
 import uuid
 import time
 import logging
-import nest_asyncio
-import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional
 
 import streamlit as st
 import pandas as pd
 import bcrypt
 import jwt
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient
 from bson import ObjectId
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-# apply nest_asyncio early
-nest_asyncio.apply()
-LOOP = asyncio.get_event_loop()
+# Load local .env for development (optional)
+load_dotenv()
 
+# Basic logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("jarvis-senpai")
 
-load_dotenv()
-
-#==============================================================================
-# ۲. فاز ۱.۲: تنظیمات محیطی و ثابت‌ها (Env & Constants)
-#==============================================================================
+# App identity
 APP_NICKNAME = "Jarvis: Senpai"
-APP_TITLE = f"{APP_NICKNAME} — هوش مصنوعی"
+APP_TITLE = f"{APP_NICKNAME} — دستیار هوشمند"
 PAGE_SIZE_MESSAGES = 50
 MIN_SECONDS_BETWEEN_PROMPTS = 0.6
 
-def get_env_var(key: str, required: bool = True) -> Optional[str]:
-    v = os.environ.get(key)
-    if required and not v:
-        raise RuntimeError(f"Environment variable `{key}` is required but not set.")
+#==============================================================================
+# ۲. فاز ۱.۲: متغیرهای محیطی (Env) — از env خوانده می‌شوند
+#==============================================================================
+def require_env(k: str) -> str:
+    v = os.environ.get(k)
+    if not v:
+        raise RuntimeError(f"Environment variable `{k}` is required but not set.")
     return v
 
-MONGO_URI = get_env_var("MONGO_URI")
-GEMINI_API_KEY = get_env_var("GEMINI_API_KEY")
-JWT_SECRET_KEY = get_env_var("JWT_SECRET_KEY")
+try:
+    MONGO_URI = require_env("MONGO_URI")
+    GEMINI_API_KEY = require_env("GEMINI_API_KEY")
+    JWT_SECRET_KEY = require_env("JWT_SECRET_KEY")
+except Exception as e:
+    # If env missing, show error in Streamlit and stop.
+    st.set_page_config(page_title="Config error", layout="centered")
+    st.error(f"تنظیمات محیطی ناقص است: {e}")
+    st.stop()
 
+# Configure genai (best-effort; errors caught at call time)
 try:
     genai.configure(api_key=GEMINI_API_KEY)
 except Exception as e:
-    logger.warning("genai.configure failed: %s", e)
+    logger.warning("genai.configure warning: %s", e)
 
 #==============================================================================
-# ۳. فاز ۲.۱: MODELS (لیست کامل مدل‌ها)
+# ۳. فاز ۲.۱: لیست MODELS (همان لیست کامل مورد نظر شما)
 #==============================================================================
 MODELS = {
     "چت متنی": {
@@ -72,49 +76,28 @@ MODELS = {
 }
 
 #==============================================================================
-# ۴. فاز ۲.۲: استایل اپ (Streamlit page config + CSS)
+# ۴. فاز ۲.۲: استایل صفحه و پیکربندی Streamlit
 #==============================================================================
 st.set_page_config(page_title=APP_TITLE, layout="wide", initial_sidebar_state="collapsed", page_icon="😺")
-st.markdown(f"""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700&display=swap');
-html, body, [class*="st-"] {{ font-family: 'Vazirmatn', sans-serif; direction: rtl; }}
-.header-row {{ display:flex; align-items:center; gap:12px; }}
-.app-badge {{ background:#ff6b6b; color:white; padding:6px 10px; border-radius:999px; font-weight:700; }}
-.stChatMessage {{ border-radius: 12px; border: 1px solid #374151; background-color: #0b1220; margin-bottom: 1rem; padding:8px; }}
-.stChatMessage:has(div[data-testid="stChatMessageContent.user"]) {{ background-color:#063983; color:white; }}
-.sidebar .stButton>button {{ width:100%; }}
-.model-card {{ background:#0f1724; border:1px solid #1f2937; padding:10px; border-radius:10px; margin-bottom:8px; }}
-.badge {{ display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; margin-left:6px; }}
-.rpm {{ background:#063f7a; color:#fff; }}
-.rpd {{ background:#6b21a8; color:#fff; }}
-.cap {{ background:#064e3b; color:#fff; }}
-</style>
-""", unsafe_allow_html=True)
-
-#==============================================================================
-# ۵. فاز ۳.۱: ابزار کمکی (helpers)
-#==============================================================================
-def run_async(func: Callable, *args, **kwargs):
+st.markdown(
     """
-    Run an async function in the global LOOP and return its result.
-    IMPORTANT: callers must pass the coroutine *function* and args, NOT a coroutine object.
-    Example: run_async(db_get_user_by_email, email)
-    """
-    if not callable(func):
-        raise ValueError("run_async expects a callable coroutine function as first argument.")
-    try:
-        return LOOP.run_until_complete(func(*args, **kwargs))
-    except Exception as e:
-        # log and re-raise for visibility
-        logger.exception("run_async error: %s", e)
-        raise
-
-def now_ts():
-    return time.time()
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700&display=swap');
+    html, body, [class*="st-"] { font-family: 'Vazirmatn', sans-serif; direction: rtl; }
+    .header-row { display:flex; align-items:center; gap:12px; }
+    .app-badge { background:#ff6b6b; color:white; padding:6px 10px; border-radius:999px; font-weight:700; }
+    .stChatMessage { border-radius: 12px; border: 1px solid #374151; background-color: #0b1220; margin-bottom: 1rem; padding:8px; }
+    .stChatMessage:has(div[data-testid="stChatMessageContent.user"]) { background-color:#063983; color:white; }
+    .model-card { background:#0f1724; border:1px solid #1f2937; padding:10px; border-radius:10px; margin-bottom:8px; }
+    .badge { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; margin-left:6px; }
+    .rpm { background:#063f7a; color:#fff; } .rpd { background:#6b21a8; color:#fff; } .cap { background:#064e3b; color:#fff; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 #==============================================================================
-# ۶. فاز ۳.۲: auth helpers (bcrypt + jwt)
+# ۵. فاز ۳.۱: توابع کمکی احراز هویت (bcrypt + jwt)
 #==============================================================================
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -130,8 +113,8 @@ def create_jwt_token(user_info: dict) -> str:
         "sub": user_info["id"],
         "name": user_info["name"],
         "email": user_info["email"],
-        "iat": datetime.now(timezone.utc).timestamp(),
-        "exp": (datetime.now(timezone.utc) + timedelta(days=1)).timestamp(),
+        "iat": int(datetime.now(timezone.utc).timestamp()),
+        "exp": int((datetime.now(timezone.utc) + timedelta(days=1)).timestamp()),
     }
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm="HS256")
 
@@ -141,46 +124,42 @@ def decode_jwt_token(token: str) -> Optional[dict]:
     try:
         return jwt.decode(token, JWT_SECRET_KEY, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
-        st.warning("نشست شما منقضی شده است — لطفاً دوباره وارد شوید.")
+        st.warning("نشست شما منقضی شده است. لطفاً دوباره وارد شوید.")
         return None
     except Exception as e:
-        logger.warning("decode_jwt_token error: %s", e)
+        logger.warning("Invalid JWT: %s", e)
         return None
 
 #==============================================================================
-# ۷. فاز ۴.۱: DB client (motor) و wrapper های async
+# ۶. فاز ۴.۱: پایگاه داده — pymongo (همگرا / synchronous) — ایمن و ساده
 #==============================================================================
-@st.cache_resource
-def get_db_client() -> AsyncIOMotorClient:
-    return AsyncIOMotorClient(MONGO_URI)
+client = MongoClient(MONGO_URI)
+db = client["jarvis_senpai_db"]
+users_coll = db["users"]
+conversations_coll = db["conversations"]
 
-DB_CLIENT = get_db_client()
-DB = DB_CLIENT["jarvis_senpai_db"]
-USERS_COLL = DB["users"]
-CONV_COLL = DB["conversations"]
-
-async def db_get_user_by_email(email: str) -> Optional[dict]:
+def db_get_user_by_email_sync(email: str) -> Optional[dict]:
     if not email:
         return None
-    return await USERS_COLL.find_one({"email": email.lower().strip()})
+    return users_coll.find_one({"email": email.lower().strip()})
 
-async def db_create_user(name: str, email: str, password: str) -> str:
+def db_create_user_sync(name: str, email: str, password: str) -> str:
     doc = {"name": name, "email": email.lower().strip(), "password": hash_password(password), "created_at": datetime.now(timezone.utc)}
-    res = await USERS_COLL.insert_one(doc)
-    logger.info("Created user %s", res.inserted_id)
+    res = users_coll.insert_one(doc)
+    logger.info("User created: %s", res.inserted_id)
     return str(res.inserted_id)
 
-async def db_create_conversation(user_id: str, title: str) -> str:
+def db_create_conversation_sync(user_id: str, title: str) -> str:
     conv = {"user_id": ObjectId(user_id), "title": title or "مکالمه جدید", "created_at": datetime.now(timezone.utc), "messages": []}
-    res = await CONV_COLL.insert_one(conv)
+    res = conversations_coll.insert_one(conv)
     return str(res.inserted_id)
 
-async def db_get_conversations(user_id: str) -> List[dict]:
-    cursor = CONV_COLL.find({"user_id": ObjectId(user_id)}).sort("created_at", -1)
-    return await cursor.to_list(length=200)
+def db_get_conversations_sync(user_id: str) -> List[dict]:
+    cursor = conversations_coll.find({"user_id": ObjectId(user_id)}).sort("created_at", -1)
+    return list(cursor)
 
-async def db_get_messages(conv_id: str, limit: int = PAGE_SIZE_MESSAGES, offset: int = 0) -> List[dict]:
-    doc = await CONV_COLL.find_one({"_id": ObjectId(conv_id)}, {"messages": 1})
+def db_get_messages_sync(conv_id: str, limit: int = PAGE_SIZE_MESSAGES, offset: int = 0) -> List[dict]:
+    doc = conversations_coll.find_one({"_id": ObjectId(conv_id)}, {"messages": 1})
     if not doc:
         return []
     msgs = doc.get("messages", []) or []
@@ -189,69 +168,93 @@ async def db_get_messages(conv_id: str, limit: int = PAGE_SIZE_MESSAGES, offset:
     sliced = msgs[start:end]
     return sliced
 
-async def db_append_message(conv_id: str, msg: dict):
-    await CONV_COLL.update_one({"_id": ObjectId(conv_id)}, {"$push": {"messages": msg}})
+def db_append_message_sync(conv_id: str, msg: dict):
+    conversations_coll.update_one({"_id": ObjectId(conv_id)}, {"$push": {"messages": msg}})
 
-async def db_update_user_name(user_id: str, name: str):
-    await USERS_COLL.update_one({"_id": ObjectId(user_id)}, {"$set": {"name": name}})
+def db_update_user_name_sync(user_id: str, name: str):
+    users_coll.update_one({"_id": ObjectId(user_id)}, {"$set": {"name": name}})
 
 #==============================================================================
-# ۸. فاز ۴.۲: Gemini interaction (sync-friendly)
+# ۷. فاز ۴.۲: تعامل با Gemini (سینک، قابل-انعطاف برای نسخه‌های SDK مختلف)
 #==============================================================================
 def call_gemini_sync(api_history: List[Dict[str, Any]], model_id: str) -> str:
     """
-    Call genai synchronously (best-effort):
-    - try sync .generate_content if available
-    - otherwise run an async call via run_async on a fresh coroutine
+    فراخوانی همزمان Gemini با تلاش برای پشتیبانی از چند نسخهٔ SDK.
+    api_history: لیستی از پیام‌ها با فرم {'role': 'user'/'model', 'parts': [{'text': ...}]}
+    model_id: شناسهٔ مدل از MODELS
     """
+    if not GEMINI_API_KEY:
+        return "**خطا: کلید API گوگل تنظیم نشده است.**"
     try:
         model = genai.GenerativeModel(model_id)
+        # برخی نسخه‌های SDK متد sync دارند
         if hasattr(model, "generate_content"):
             try:
-                resp = model.generate_content({"messages": api_history})
-            except Exception:
-                # fallback signature
-                resp = model.generate_content(api_history)
-            text = ""
+                # بعضی SDKها signature متفاوت دارند؛ سعی می‌کنیم چند تا را امتحان کنیم
+                try:
+                    resp = model.generate_content({"messages": api_history})
+                except Exception:
+                    resp = model.generate_content(api_history)
+            except Exception as e:
+                logger.exception("generate_content (sync) failed: %s", e)
+                return f"**خطا در فراخوانی مدل (sync):** {e}"
+            # استخراج متن از پاسخ بر حسب شکل‌های معمول
             if getattr(resp, "text", None):
-                text = resp.text
-            else:
-                # try common nested structures
-                if getattr(resp, "candidates", None):
-                    try:
-                        for cand in resp.candidates:
-                            if getattr(cand, "content", None):
-                                for p in cand.content:
-                                    if getattr(p, "text", None):
-                                        text += p.text
-                    except Exception:
-                        text = str(resp)
-            return text or str(resp)
+                return resp.text
+            if getattr(resp, "candidates", None):
+                text = ""
+                for cand in resp.candidates:
+                    if getattr(cand, "content", None):
+                        for p in cand.content:
+                            if getattr(p, "text", None):
+                                text += p.text
+                if text:
+                    return text
+            return str(resp)
         else:
-            async def _call():
+            # fallback: بعضی SDKها فقط async دارند — در این حالت با asyncio.run فرخوانی می‌کنیم
+            async def _call_async():
                 model_async = genai.GenerativeModel(model_id)
                 stream = await model_async.generate_content_async(api_history, stream=False)
-                text_acc = ""
                 if getattr(stream, "text", None):
-                    text_acc += stream.text
-                else:
-                    if getattr(stream, "candidates", None):
-                        for c in stream.candidates:
-                            if getattr(c, "content", None):
-                                for p in c.content:
-                                    if getattr(p, "text", None):
-                                        text_acc += p.text
-                return text_acc or str(stream)
-            # IMPORTANT: pass coroutine function to run_async (not the coroutine object)
-            return run_async(_call)
+                    return stream.text
+                if getattr(stream, "candidates", None):
+                    text = ""
+                    for c in stream.candidates:
+                        if getattr(c, "content", None):
+                            for p in c.content:
+                                if getattr(p, "text", None):
+                                    text += p.text
+                    return text or str(stream)
+                return str(stream)
+            try:
+                # run a fresh event loop for this single call (safe in sync app)
+                return asyncio.run(_call_async())
+            except Exception as e:
+                logger.exception("generate_content_async fallback failed: %s", e)
+                return f"**خطای async fallback:** {e}"
     except Exception as e:
-        logger.exception("call_gemini_sync error")
-        return f"**خطا در فراخوانی Gemini:** {e}"
+        logger.exception("call_gemini_sync outer error: %s", e)
+        return f"**خطا در آماده‌سازی مدل:** {e}"
+
+def generate_media_sync(prompt: str, model_id: str) -> str:
+    """
+    Placeholder: تولید تصویر/ویدیو. اگر API واقعی تولید تصویر/ویدیو را دارید این تابع را جایگزین کنید.
+    """
+    # تصویر تصادفی
+    if "image" in model_id.lower() or "imagen" in model_id.lower():
+        seed = uuid.uuid4().hex[:10]
+        return f"https://picsum.photos/seed/{seed}/1024/768"
+    # ویدیو نمونه
+    if "veo" in model_id.lower() or "video" in model_id.lower():
+        return "https://www.w3schools.com/html/mov_bbb.mp4"
+    # fallback
+    return f"https://picsum.photos/seed/{uuid.uuid4().hex[:10]}/1024/768"
 
 #==============================================================================
-# ۹. فاز ۵.۱: کلاس اصلی اپ (JarvisSenpai)
+# ۸. فاز ۵.۱: کلاس اپلیکیشن (سینک، یک فایل)
 #==============================================================================
-class JarvisSenpai:
+class JarvisSenpaiApp:
     def __init__(self):
         self._init_session_state()
 
@@ -272,8 +275,9 @@ class JarvisSenpai:
             if k not in st.session_state:
                 st.session_state[k] = v
 
-    def render_models_info_compact(self):
-        st.markdown("### 🔎 مدل‌های در دسترس (جمع‌وجور)")
+    # ---------- نمایش مدل‌ها ----------
+    def render_models_info(self):
+        st.markdown("### 🔎 مدل‌های در دسترس")
         for cat, group in MODELS.items():
             st.write(f"**{cat}**")
             cols = st.columns(min(3, max(1, len(group))))
@@ -281,30 +285,31 @@ class JarvisSenpai:
             for name, info in group.items():
                 with cols[i % len(cols)]:
                     st.markdown(f"""
-                    <div class="model-card">
-                        <strong>{name}</strong>
-                        <div style="margin-top:8px; margin-bottom:6px;">
-                            <span class="badge rpm">RPM: {info['RPM']}</span>
-                            <span class="badge rpd">RPD: {info['RPD']}</span>
-                            <span class="badge cap">{info['capabilities']}</span>
+                        <div class="model-card">
+                            <strong>{name}</strong>
+                            <div style="margin-top:8px; margin-bottom:6px;">
+                                <span class="badge rpm">RPM: {info['RPM']}</span>
+                                <span class="badge rpd">RPD: {info['RPD']}</span>
+                                <span class="badge cap">{info['capabilities']}</span>
+                            </div>
+                            <small style="opacity:0.85">id: <code>{info['id']}</code></small>
                         </div>
-                        <small style="opacity:0.85">id: <code>{info['id']}</code></small>
-                    </div>
                     """, unsafe_allow_html=True)
                 i += 1
-            st.write("---")
-        st.markdown("### جدول کامل مدل‌ها")
-        data = {'نام مدل': [], 'دسته': [], 'capabilities': [], 'RPM': [], 'RPD': [], 'model_id': []}
+        st.markdown("---")
+        # جدول
+        rows = {"نام مدل": [], "دسته": [], "capabilities": [], "RPM": [], "RPD": [], "model_id": []}
         for cat, g in MODELS.items():
             for n, inf in g.items():
-                data['نام مدل'].append(n)
-                data['دسته'].append(cat)
-                data['capabilities'].append(inf['capabilities'])
-                data['RPM'].append(inf['RPM'])
-                data['RPD'].append(inf['RPD'])
-                data['model_id'].append(inf['id'])
-        st.dataframe(pd.DataFrame(data), use_container_width=True)
+                rows["نام مدل"].append(n)
+                rows["دسته"].append(cat)
+                rows["capabilities"].append(inf["capabilities"])
+                rows["RPM"].append(inf["RPM"])
+                rows["RPD"].append(inf["RPD"])
+                rows["model_id"].append(inf["id"])
+        st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
+    # ---------- ورود / ثبت‌نام ----------
     def render_login_signup(self):
         st.title(f"{APP_NICKNAME} — ورود / ثبت‌نام")
         col1, col2 = st.columns([3, 1])
@@ -318,11 +323,10 @@ class JarvisSenpai:
                         if not email or not pwd:
                             st.error("ایمیل و رمز را وارد کنید.")
                         else:
-                            # pass the function and args to run_async (do NOT pass coroutine object)
-                            user = run_async(db_get_user_by_email, email)
+                            user = db_get_user_by_email_sync(email)
                             if user and verify_password(pwd, user.get("password","")):
-                                payload = {"id": str(user["_id"]), "name": user.get("name","کاربر"), "email": user.get("email","")}
-                                st.session_state.token = create_jwt_token(payload)
+                                info = {"id": str(user["_id"]), "name": user.get("name","کاربر"), "email": user["email"]}
+                                st.session_state.token = create_jwt_token(info)
                                 st.session_state.page = "dashboard"
                                 st.session_state.initialized = False
                                 st.experimental_rerun()
@@ -341,17 +345,18 @@ class JarvisSenpai:
                             st.error("رمزها مطابقت ندارند.")
                         elif len(p1) < 6:
                             st.error("رمز باید حداقل ۶ کاراکتر باشد.")
-                        elif run_async(db_get_user_by_email, email2):
+                        elif db_get_user_by_email_sync(email2):
                             st.error("این ایمیل قبلاً ثبت شده است.")
                         else:
-                            uid = run_async(db_create_user, name, email2, p1)
+                            uid = db_create_user_sync(name, email2, p1)
                             st.success("ثبت‌نام موفق — اکنون وارد شوید.")
-                            logger.info("User created %s", uid)
+                            logger.info("New user: %s", uid)
         with col2:
             st.markdown(f"### 👋 خوش آمدید به {APP_NICKNAME}")
             st.markdown("- پیکربندی از متغیرهای محیطی خوانده می‌شود.")
-            st.markdown("- مدل‌ها: چت متنی، تولید تصویر و تولید ویدیو (RPM/RPD اطلاع‌رسانی).")
+            st.markdown("- از Gemini برای تولید متن/تصویر استفاده می‌شود (در صورت دسترسی API).")
 
+    # ---------- سایدبار ----------
     def render_sidebar(self, user_payload: dict):
         with st.sidebar:
             st.header(f"👤 {user_payload.get('name','کاربر')}")
@@ -363,20 +368,20 @@ class JarvisSenpai:
             st.markdown("---")
             st.subheader("تاریخچه مکالمات")
             try:
-                convs = run_async(db_get_conversations, user_payload["sub"])
+                convs = db_get_conversations_sync(user_payload["sub"])
                 st.session_state.conversations_list = convs
                 for c in convs:
                     cid = str(c["_id"])
-                    label = c.get("title","بدون عنوان")[:35]
+                    label = c.get("title","بدون عنوان")[:30]
                     is_active = cid == st.session_state.current_conv_id
                     if st.button(f"{'🔹 ' if is_active else ''}{label}", key=f"conv_{cid}", use_container_width=True):
                         if not is_active:
                             st.session_state.current_conv_id = cid
                             st.session_state.messages_offset = 0
-                            st.session_state.messages = run_async(db_get_messages, cid, PAGE_SIZE_MESSAGES, 0)
+                            st.session_state.messages = db_get_messages_sync(cid, PAGE_SIZE_MESSAGES, 0)
                             st.experimental_rerun()
             except Exception as e:
-                logger.exception("Error loading conversations: %s", e)
+                logger.exception("Error loading convs: %s", e)
                 st.error("خطا در بارگذاری مکالمات.")
             st.markdown("---")
             if st.button("👤 پروفایل", use_container_width=True):
@@ -386,15 +391,16 @@ class JarvisSenpai:
                 st.session_state.clear()
                 st.experimental_rerun()
 
+    # ---------- داشبورد ----------
     def render_dashboard(self, user_payload: dict):
         self.render_sidebar(user_payload)
         st.header(f"💬 گفتگوی هوشمند — {APP_NICKNAME}")
-        left, right = st.columns([3,1])
+        left, right = st.columns([3, 1])
         with right:
             st.session_state.media_mode = st.checkbox("فعال کردن حالت تصویر/ویدیو", value=st.session_state.media_mode)
             if st.session_state.media_mode:
-                media_type = st.radio("نوع محتوا:", ["تولید تصویر","تولید ویدیو"], horizontal=True)
-                model_list = MODELS["تولید تصویر"] if media_type=="تولید تصویر" else MODELS["تولید ویدیو"]
+                media_type = st.radio("نوع محتوا:", ["تولید تصویر", "تولید ویدیو"], horizontal=True)
+                model_list = MODELS["تولید تصویر"] if media_type == "تولید تصویر" else MODELS["تولید ویدیو"]
                 selected_model_name = st.selectbox("مدل:", list(model_list.keys()))
                 technical_model_id = model_list[selected_model_name]["id"]
             else:
@@ -404,105 +410,98 @@ class JarvisSenpai:
 
         st.markdown("---")
 
+        # load messages for active conversation
         if st.session_state.current_conv_id and not st.session_state.messages:
-            st.session_state.messages = run_async(db_get_messages, st.session_state.current_conv_id, PAGE_SIZE_MESSAGES, 0)
+            st.session_state.messages = db_get_messages_sync(st.session_state.current_conv_id, PAGE_SIZE_MESSAGES, 0)
 
         chat_box = st.container()
 
         if st.session_state.current_conv_id:
             if st.button("⤴️ بارگذاری پیام‌های قدیمی‌تر", use_container_width=True):
                 st.session_state.messages_offset = st.session_state.get("messages_offset", 0) + PAGE_SIZE_MESSAGES
-                older = run_async(db_get_messages, st.session_state.current_conv_id, PAGE_SIZE_MESSAGES, st.session_state.messages_offset)
+                older = db_get_messages_sync(st.session_state.current_conv_id, PAGE_SIZE_MESSAGES, st.session_state.messages_offset)
                 st.session_state.messages = older + st.session_state.messages
                 st.experimental_rerun()
 
         for m in st.session_state.messages:
-            role = m.get("role","user")
+            role = m.get("role", "user")
             with chat_box.chat_message(role):
-                if m.get("type")=="image":
-                    st.image(m["content"], caption=m.get("caption","تصویر تولید شده"))
-                elif m.get("type")=="video":
+                if m.get("type") == "image":
+                    st.image(m["content"], caption=m.get("caption", "تصویر تولید شده"))
+                elif m.get("type") == "video":
                     st.video(m["content"])
                 else:
                     st.markdown(m["content"])
 
+        # input form
         with st.form("chat_input_form", clear_on_submit=True):
             user_prompt = st.text_input("پیام خود را بنویسید...", key="user_prompt")
             submit = st.form_submit_button("ارسال")
             if submit and user_prompt:
-                now = now_ts()
+                now = time.time()
                 last = st.session_state.get("last_prompt_ts", 0.0)
                 if now - last < MIN_SECONDS_BETWEEN_PROMPTS:
                     st.warning("لطفاً چند لحظه صبر کنید.")
                 else:
                     st.session_state.last_prompt_ts = now
-                    # process input (use run_async inside helper)
                     self.process_chat_input(user_prompt, technical_model_id, user_payload)
 
         st.markdown("---")
         with st.expander("ℹ️ اطلاعات مدل‌ها و قابلیت‌ها — جمع‌وجور"):
-            self.render_models_info_compact()
+            self.render_models_info()
 
+    # ---------- پردازش ورودی کاربر ----------
     def process_chat_input(self, prompt: str, model_id: str, user_payload: dict):
-        """synchronous wrapper using run_async(callable, ...)"""
         try:
             user_id = user_payload["sub"]
             conv_id = st.session_state.current_conv_id
             if not conv_id:
-                conv_id = run_async(db_create_conversation, user_id, prompt[:40] or "مکالمه جدید")
+                conv_id = db_create_conversation_sync(user_id, prompt[:40] or "مکالمه جدید")
                 st.session_state.current_conv_id = conv_id
                 st.session_state.messages_offset = 0
 
             user_msg = {"_id": str(uuid.uuid4()), "role": "user", "type": "text", "content": prompt, "ts": datetime.now(timezone.utc)}
             st.session_state.messages.append(user_msg)
-            run_async(db_append_message, conv_id, user_msg)
+            db_append_message_sync(conv_id, user_msg)
 
             with st.spinner("در حال پردازش..."):
                 if st.session_state.media_mode:
-                    media_url = run_async(self._generate_media_async, prompt, model_id)
+                    media_url = generate_media_sync(prompt, model_id)
                     if "image" in model_id.lower() or "imagen" in model_id.lower():
-                        ai_msg = {"_id": str(uuid.uuid4()), "role":"assistant", "type":"image", "content":media_url, "ts": datetime.now(timezone.utc)}
+                        ai_msg = {"_id": str(uuid.uuid4()), "role": "assistant", "type": "image", "content": media_url, "ts": datetime.now(timezone.utc)}
                         st.image(media_url)
                     else:
-                        ai_msg = {"_id": str(uuid.uuid4()), "role":"assistant", "type":"video", "content":media_url, "ts": datetime.now(timezone.utc)}
+                        ai_msg = {"_id": str(uuid.uuid4()), "role": "assistant", "type": "video", "content": media_url, "ts": datetime.now(timezone.utc)}
                         st.video(media_url)
                     st.session_state.last_media = media_url
                 else:
-                    text_history = [m for m in st.session_state.messages if m.get("type","text")=="text"]
-                    api_history = [{"role": "user" if m["role"]=="user" else "model", "parts":[{"text": m["content"]}]} for m in text_history]
+                    # prepare api history in SDK-friendly shape
+                    text_history = [m for m in st.session_state.messages if m.get("type", "text") == "text"]
+                    api_history = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in text_history]
                     full_text = call_gemini_sync(api_history, model_id)
                     st.markdown(full_text)
-                    ai_msg = {"_id": str(uuid.uuid4()), "role":"assistant", "type":"text", "content": full_text, "ts": datetime.now(timezone.utc)}
+                    ai_msg = {"_id": str(uuid.uuid4()), "role": "assistant", "type": "text", "content": full_text, "ts": datetime.now(timezone.utc)}
 
                 st.session_state.messages.append(ai_msg)
-                run_async(db_append_message, conv_id, ai_msg)
+                db_append_message_sync(conv_id, ai_msg)
 
             st.experimental_rerun()
         except Exception as e:
             logger.exception("Error in process_chat_input: %s", e)
             st.error(f"خطا در پردازش پیام: {e}")
 
-    async def _generate_media_async(self, prompt: str, model_id: str) -> str:
-        if "image" in model_id.lower() or "imagen" in model_id.lower():
-            await asyncio.sleep(2.2)
-            return f"https://picsum.photos/seed/{uuid.uuid4().hex[:10]}/1024/768"
-        if "veo" in model_id.lower() or "video" in model_id.lower():
-            await asyncio.sleep(4)
-            return "https://www.w3schools.com/html/mov_bbb.mp4"
-        await asyncio.sleep(2)
-        return f"https://picsum.photos/seed/{uuid.uuid4().hex[:10]}/1024/768"
-
+    # ---------- پروفایل ----------
     def render_profile(self, user_payload: dict):
         self.render_sidebar(user_payload)
         st.title("👤 پروفایل شما")
         with st.form("profile_form"):
-            name = st.text_input("نام کامل", value=user_payload.get("name",""))
-            st.write(f"**ایمیل:** `{user_payload.get('email','')}`")
+            name = st.text_input("نام کامل", value=user_payload.get("name", ""))
+            st.write(f"**ایمیل:** `{user_payload.get('email', '')}`")
             if st.form_submit_button("ذخیره"):
                 try:
-                    run_async(db_update_user_name, user_payload["sub"], name)
+                    db_update_user_name_sync(user_payload["sub"], name)
                     st.success("پروفایل با موفقیت به‌روزرسانی شد.")
-                    new_payload = {"id": user_payload["sub"], "name": name, "email": user_payload.get("email","")}
+                    new_payload = {"id": user_payload["sub"], "name": name, "email": user_payload.get("email", "")}
                     st.session_state.token = create_jwt_token(new_payload)
                     time.sleep(0.6)
                     st.experimental_rerun()
@@ -510,6 +509,7 @@ class JarvisSenpai:
                     logger.exception("Profile update error: %s", e)
                     st.error("خطا در بروزرسانی پروفایل.")
 
+    # ---------- Router ----------
     def run(self):
         self._init_session_state()
         token = st.session_state.get("token")
@@ -519,14 +519,15 @@ class JarvisSenpai:
             self.render_login_signup()
             return
 
+        # load convs once
         if not st.session_state.get("initialized", False):
             try:
-                st.session_state.conversations_list = run_async(db_get_conversations, user_payload["sub"])
+                st.session_state.conversations_list = db_get_conversations_sync(user_payload["sub"])
             except Exception as e:
-                logger.exception("Error loading convs: %s", e)
+                logger.exception("Error loading conversations: %s", e)
             st.session_state.initialized = True
 
-        page = st.session_state.get("page","dashboard")
+        page = st.session_state.get("page", "dashboard")
         if page == "dashboard":
             self.render_dashboard(user_payload)
         elif page == "profile":
@@ -535,10 +536,10 @@ class JarvisSenpai:
             st.error("صفحهٔ نامعتبر")
 
 #==============================================================================
-# ۱۰. فاز ۶.۱: اجرای اپ
+# ۹. فاز ۶.۱: اجرای اپ
 #==============================================================================
 if __name__ == "__main__":
-    app = JarvisSenpai()
+    app = JarvisSenpaiApp()
     try:
         app.run()
     except Exception as e:
