@@ -1,13 +1,20 @@
+# --- Core Application Framework ---
 chainlit
-motor
 python-dotenv
-bcrypt
-PyJWT
 google-generativeai
-pillow
+
+# --- Database & Caching ---
+motor
 aioredis
-rq
 redis
+rq
+
+# --- Data Processing & AI ---
 sentence-transformers
 faiss-cpu
+pandas
+pillow
+
+# --- External Services & File Formats ---
 tavily-python
+pdfminer.six
