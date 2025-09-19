@@ -1,3 +1,17 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Saino Elite - Final single-file app updated for modern SDKs.
+
+Run:
+  chainlit run app.py
+
+Requirements:
+  pip install --upgrade google-genai chainlit motor python-dotenv pandas tavily-python aiohttp
+  (and remove old google-generativeai if present)
+"""
+
 import os
 import uuid
 import json
