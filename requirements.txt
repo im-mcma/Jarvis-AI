@@ -1,8 +1,15 @@
-streamlit
+# === requirements.txt ===
+# chainlit: آخرین نسخه پایدار
+chainlit
+# pymongo برای اتصال به MongoDB
 pymongo
+# bcrypt
 bcrypt
-pandas
-google-generativeai
-pyjwt
+# PyJWT
+PyJWT
+# python-dotenv
 python-dotenv
-nest_asyncio
+# google generative ai client
+google-generativeai
+# (اختیاری) برای توسعه محلی
+uvicorn
