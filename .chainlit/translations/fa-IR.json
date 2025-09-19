@@ -1,0 +1,51 @@
+{
+  "version": "Saino Elite",
+  "system_messages": {
+    "ready": "### Saino Elite\nدر فضای کاری **{workspace_id}** آماده‌ام.",
+    "internal_error": "خطای داخلی: {error}",
+    "mongo_fail": "اتصال به MongoDB موفق نبود",
+    "tool_error": "خطا در اجرای ابزار: {tool}"
+  },
+  "actions": {
+    "new_conversation": "➕ مکالمه جدید",
+    "show_notes": "🗒️ یادداشت‌ها",
+    "manage_workspaces": "🗂️ مدیریت فضاها",
+    "open_settings": "⚙️ تنظیمات",
+    "reply_to_message": "ریپلای",
+    "edit_note": "✏️ ویرایش",
+    "delete_note": "🗑️ حذف",
+    "add_workspace": "➕ افزودن",
+    "confirm_edit": "✔ ذخیره"
+  },
+  "tool_messages": {
+    "generate_image": {
+      "start": "در حال تولید تصویر برای: `{prompt}` ...",
+      "done": "تصویر تولید شد برای: `{prompt}`",
+      "error": "خطا در تولید تصویر: {error}"
+    },
+    "display_table": {
+      "invalid_json": "JSON نامعتبر: باید لیست از اشیا باشد",
+      "error": "خطا در نمایش جدول: {error}"
+    },
+    "search": {
+      "start": "در حال جستجو برای `{query}` ...",
+      "no_client": "کلاینت Tavily موجود نیست — نصب tavily-python و تنظیم TAVILY_API_KEY لازم است.",
+      "results": "### نتایج جستجو برای `{query}`:\n\n",
+      "error": "خطا در جستجو: {error}"
+    }
+  },
+  "notes": {
+    "no_notes": "یادداشتی وجود ندارد.",
+    "added": "یادداشت افزوده شد.",
+    "updated": "یادداشت بروزرسانی شد.",
+    "delete_error": "خطا در حذف یادداشت.",
+    "not_found": "خطا در یافتن یادداشت."
+  },
+  "messages": {
+    "user": "User",
+    "assistant": "Saino Elite",
+    "table": "Table",
+    "notes": "Notes",
+    "system": "System"
+  }
+}
