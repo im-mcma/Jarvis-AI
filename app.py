@@ -41,15 +41,21 @@ except Exception as e:
 # --- Models Dictionary ---
 MODELS = {
     "چت متنی": {
-        "Gemini 1.5 Flash (Recommended)": {"id": "gemini-1.5-flash-latest"},
-        "Gemini 1.5 Pro": {"id": "gemini-1.5-pro-latest"},
-        "Gemini 1.0 Pro": {"id": "gemini-pro"},
+        "Gemini 2.5 Pro": {"id": "gemini-2.5-pro", "RPM": 5, "RPD": 100, "capabilities": "استدلال و پاسخ‌گویی پیچیده"},
+        "Gemini 2.5 Flash": {"id": "gemini-2.5-flash", "RPM": 10, "RPD": 250, "capabilities": "متعادل: سرعت و دقت"},
+        "Gemini 2.5 Flash-Lite": {"id": "gemini-2.5-flash-lite", "RPM": 15, "RPD": 1000, "capabilities": "بهینه برای حجم بالا"},
+        "Gemini 2.0 Pro": {"id": "gemini-2.0-pro", "RPM": 15, "RPD": 200, "capabilities": "پایدار و سازگار"},
+        "Gemini 2.0 Flash": {"id": "gemini-2.0-flash", "RPM": 30, "RPD": 200, "capabilities": "سریع، برای درخواست‌های فراوان"}
     },
-    "پردازش تصویر (چندوجهی)": {
-        "Gemini 1.5 Flash (Vision)": {"id": "gemini-1.5-flash-latest"},
-        "Gemini 1.0 Pro (Vision)": {"id": "gemini-pro-vision"},
+    "تولید تصویر": {
+        "Gemini 2.5 Flash Image": {"id": "gemini-2.5-flash-image-preview", "RPM": 10, "RPD": 100, "capabilities": "تولید و ویرایش تصویر"},
+        "Gemini 2.0 Flash Image": {"id": "gemini-2.0-flash-image", "RPM": 15, "RPD": 200, "capabilities": "پایدار در تولید تصویر"}
+    },
+    "تولید ویدیو": {
+        "Veo 3": {"id": "veo-3", "RPM": 5, "RPD": 50, "capabilities": "تولید ویدیو و صدا/افکت"}
     }
 }
+
 
 # ------------------------------------------------------------
 # 2. Core Logic Classes
