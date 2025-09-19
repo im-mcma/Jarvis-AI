@@ -10,3 +10,4 @@ rq
 redis
 sentence-transformers
 faiss-cpu
+tavily-python
