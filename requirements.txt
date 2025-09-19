@@ -5,7 +5,6 @@ google-generativeai
 
 # --- Database & Caching ---
 motor
-aioredis
 redis
 rq
 
