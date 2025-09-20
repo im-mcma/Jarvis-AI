@@ -5,3 +5,8 @@ google-generativeai
 pandas 
 aiohttp
 tavily-python
+pydantic
+dotenv
+pypdf
+docx
+tavily
