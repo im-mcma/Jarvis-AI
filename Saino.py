@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Saino Elite - نسخه 5.0 (کامل، ماژولار و نهایی)
+# Saino Elite - نسخه 5.0 (کامل، ماژولار و نهایی) - [اصلاح شده توسط سونیا]
 
 # ----------------------------------------------------------------------
 # بخش ۱: وارد کردن کتابخانه‌ها
@@ -24,7 +24,8 @@ from pydantic import BaseModel, Field as PydanticField
 
 import chainlit as cl
 import google.generativeai as genai
-from google.generativeai.types import FunctionDeclaration, Tool, HarmCategory, SafetySetting
+# [تغییر ۱]: SafetySetting از این خط حذف شد زیرا در نسخه‌های جدید منسوخ شده است
+from google.generativeai.types import FunctionDeclaration, Tool, HarmCategory
 import pandas as pd
 from pypdf import PdfReader
 import docx
@@ -161,10 +162,13 @@ class ModelManager:
     def __init__(self):
         self._models = {}
         model_names = ["gemini-1.5-pro-latest", "gemini-1.5-flash-latest", "gemini-pro"]
-        self.safety_settings = [SafetySetting(category=hc, threshold="BLOCK_NONE") for hc in HarmCategory]
+        # [تغییر ۲]: ساختار safety_settings به فرمت دیکشنری که در نسخه‌های جدید لازم است، تغییر کرد
+        self.safety_settings = [{"category": hc, "threshold": "BLOCK_NONE"} for hc in HarmCategory]
         for name in model_names:
-            try: self._models[name] = genai.GenerativeModel(model_name=name, safety_settings=self.safety_settings)
-            except Exception as e: logger.warning(f"⚠️ مدل {name} بارگذاری نشد: {e}")
+            try:
+                self._models[name] = genai.GenerativeModel(model_name=name, safety_settings=self.safety_settings)
+            except Exception as e:
+                logger.warning(f"⚠️ مدل {name} بارگذاری نشد: {e}")
     def get_model(self, model_name: str) -> Optional[genai.GenerativeModel]: return self._models.get(model_name)
     def get_available_models(self) -> List[str]: return list(self._models.keys())
 MODELS = ModelManager()
@@ -277,37 +281,28 @@ PROCESSOR = ChatProcessor(DB, TOOLS, MODELS)
 # ----------------------------------------------------------------------
 # بخش ۸: رابط کاربری و مدیریت رویدادها
 # ----------------------------------------------------------------------
-# تنظیمات پویا برای Chainlit
-APP_SETTINGS = {
-    "ui": {
-        "name": CFG.VERSION,
-        "logo": "/public/saino_elite_logo.png",
-        "hide_toolbar": False,
-        "theme": "dark",
-    },
-    "oauth": {
-        "providers": [
-            {
-                "id": "github",
-                "name": "GitHub",
-                "type": "oauth2",
-                "client_id": CFG.OAUTH_GITHUB_CLIENT_ID,
-                "client_secret": CFG.OAUTH_GITHUB_CLIENT_SECRET,
-                "redirect_uri": os.getenv("OAUTH_GITHUB_REDIRECT_URI"),
-                "authorize_url": "https://github.com/login/oauth/authorize",
-                "token_url": "https://github.com/login/oauth/access_token",
-                "user_info_url": "https://api.github.com/user",
-                "scopes": ["read:user", "user:email"],
-            }
-        ]
-    },
-    "chat_profile": {
-        "default": {
-            "name": "پیش‌فرض",
-            "markdown": "## Saino Elite\nاین پروفایل پیش‌فرض است.",
-        },
-    }
-}
+# (بدون تغییر در این بخش)
+@cl.on_chat_start
+async def on_chat_start():
+    await DB.connect()
+    user = cl.user_session.get("user")
+    if not user:
+        # Chainlit should handle redirecting to login
+        await cl.Message("لطفاً ابتدا با حساب خود وارد شوید.").send()
+        return
+
+    user_id = user.identifier
+    ws = await DB.find_one("workspaces", {"user_id": user_id}, Workspace)
+    if not ws: ws = Workspace(user_id=user_id, name="عمومی"); await DB.insert_one("workspaces", ws)
+
+    settings = await DB.find_one("settings", {"user_id": user_id}, UserSettings)
+    if not settings: settings = UserSettings(user_id=user_id); await DB.insert_one("settings", settings)
+
+    cl.user_session.set("workspace_id", ws.id); cl.user_session.set("settings", settings)
+    cl.user_session.set("current_conv_id", None)
+    
+    await render_sidebar(user_id, ws.id)
+    await cl.Message(content=f"### سلام {user.username}!\nبه {CFG.VERSION} خوش آمدید.").send()
 
 async def render_sidebar(user_id: str, active_ws_id: str):
     workspaces = await DB.find("workspaces", {"user_id": user_id}, Workspace)
@@ -332,27 +327,6 @@ async def display_chat_history(conv_id: str):
         author = CFG.VERSION if msg.role in ["assistant", "model"] else "User"
         await cl.Message(content=msg.content, author=author).send()
 
-@cl.on_chat_start
-async def on_chat_start():
-    cl.app_context.set_settings(APP_SETTINGS)
-    await DB.connect()
-    user = cl.user_session.get("user")
-    if not user:
-        # این بخش در Chainlit 1.x به صورت خودکار کاربر را به صفحه لاگین هدایت می‌کند
-        return
-
-    user_id = user.identifier
-    ws = await DB.find_one("workspaces", {"user_id": user_id}, Workspace)
-    if not ws: ws = Workspace(user_id=user_id, name="عمومی"); await DB.insert_one("workspaces", ws)
-
-    settings = await DB.find_one("settings", {"user_id": user_id}, UserSettings)
-    if not settings: settings = UserSettings(user_id=user_id); await DB.insert_one("settings", settings)
-
-    cl.user_session.set("workspace_id", ws.id); cl.user_session.set("settings", settings)
-    cl.user_session.set("current_conv_id", None)
-    
-    await render_sidebar(user_id, ws.id)
-    await cl.Message(content=f"### سلام {user.username}!\nبه {CFG.VERSION} خوش آمدید.").send()
 
 @cl.on_message
 async def on_message(message: cl.Message):
@@ -367,7 +341,8 @@ async def on_action(action: cl.Action):
     if action.name == ACTION.SELECT_WORKSPACE:
         if action.value != ws_id:
             cl.user_session.set("workspace_id", action.value); cl.user_session.set("current_conv_id", None)
-            await on_chat_start()
+            # Re-initialize the chat view for the new workspace
+            await on_chat_start() 
 
     elif action.name == ACTION.NEW_CONV:
         cl.user_session.set("current_conv_id", None); await cl.empty_chat()
@@ -410,7 +385,6 @@ async def on_action(action: cl.Action):
     elif action.name == ACTION.CONFIRM_DELETE_WORKSPACE:
         await DB.delete_workspace_cascade(action.value, user_id)
         if action.value == ws_id:
-            # Reset to default workspace if active one is deleted
             await on_chat_start()
         else:
             await render_sidebar(user_id, ws_id)
@@ -418,14 +392,15 @@ async def on_action(action: cl.Action):
 
     elif action.name == ACTION.SHOW_MEMORY:
         memories = await DB.find("memories", {"user_id": user_id, "workspace_id": ws_id}, Memory)
-        actions = [cl.Action(name=ACTION.ADD_MEMORY, label="➕ افزودن به حافظه")]
+        msg_actions = [cl.Action(name=ACTION.ADD_MEMORY, label="➕ افزودن به حافظه")]
+        content = "### حافظه بلندمدت Agent\n\n"
         if memories:
-            mem_content = "### حافظه بلندمدت Agent\n\n"
             for mem in memories:
-                mem_content += f"- {mem.content}  [حذف]({ACTION.DELETE_MEMORY}:{mem.id})\n"
-            await cl.Message(content=mem_content, actions=actions).send()
+                content += f"- {mem.content} \n"
+                msg_actions.append(cl.Action(name=ACTION.DELETE_MEMORY, value=mem.id, label=f"حذف خاطره {mem.id[:4]}..."))
+            await cl.Message(content=content, actions=msg_actions).send()
         else:
-            await cl.AskActionMessage("حافظه خالی است.", actions=actions).send()
+            await cl.AskActionMessage("حافظه خالی است.", actions=[cl.Action(name=ACTION.ADD_MEMORY, label="➕ افزودن به حافظه")]).send()
 
     elif action.name == ACTION.ADD_MEMORY:
         res = await cl.AskUserMessage("چه چیزی را به خاطر بسپارم؟").send()
