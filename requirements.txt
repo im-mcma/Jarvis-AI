@@ -8,4 +8,6 @@ tavily-python
 pydantic
 dotenv
 pypdf
-docx
+python-docx
+tavily-python
+uvicorn
