@@ -9,4 +9,3 @@ pydantic
 dotenv
 pypdf
 docx
-tavily
