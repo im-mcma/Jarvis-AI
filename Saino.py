@@ -1,5 +1,100 @@
 # -*- coding: utf-8 -*-
-# Saino Elite - نسخه 5.0 (کامل، ماژولار و نهایی) - [اصلاح شده توسط سونیا]
+# فایل پیکربندی مدل‌ها - مخصوص Saino Elite
+
+# ---------------------------
+# مدل‌ها و اطلاعاتشان
+# ---------------------------
+# این دیکشنری به صورت مستقیم و بدون هیچ تغییری از ورودی شما استفاده شده است.
+# این فایل به طور کامل از منطق اصلی برنامه جداست.
+MODEL_INFO = {
+    "gemini-2.5-pro": {
+        "display": "Gemini 2.5 Pro",
+        "rpm": 5, "rpd": 100, "monthly_30d": 3000,
+        "inputs": ["audio", "images", "video", "text", "PDF"],
+        "outputs": ["text"],
+        "note": "مدل «thinking»، کانتکست بسیار بلند؛ تصویر/ویدیو/صدا را تحلیل می‌کند اما خروجی متن است."
+    },
+    "gemini-2.5-flash": {
+        "display": "Gemini 2.5 Flash",
+        "rpm": 10, "rpd": 250, "monthly_30d": 7500,
+        "inputs": ["text", "images", "video", "audio"],
+        "outputs": ["text"],
+        "note": "قیمت-کارایی مناسب برای حجم بالا؛ خروجی متن."
+    },
+    "gemini-2.5-flash-lite": {
+        "display": "Gemini 2.5 Flash-Lite",
+        "rpm": 15, "rpd": 1000, "monthly_30d": 30000,
+        "inputs": ["text", "image", "video", "audio", "PDF"],
+        "outputs": ["text"],
+        "note": "بهینه‌شده برای Throughput بالا/هزینه کم."
+    },
+    "gemini-live-2.5-flash-preview": {
+        "display": "Gemini 2.5 Flash Live (preview)",
+        "rpm": 3, "rpd": None, "monthly_30d": None,
+        "inputs": ["audio", "video", "text"], "outputs": ["text", "audio"],
+        "note": "حالت low-latency صوت + ویدیو؛ نرخ‌های کامل منتشر نشده."
+    },
+    "gemini-2.5-flash-preview-native-audio-dialog": {
+        "display": "Gemini 2.5 Flash Native Audio Dialog (preview)",
+        "rpm": 1, "rpd": 5, "monthly_30d": 150,
+        "inputs": ["audio", "video", "text"], "outputs": ["audio","text"],
+        "note": "خروجی همزمان صوت و متن؛ نرخ محدود برای preview."
+    },
+    "gemini-2.5-flash-preview-tts": {
+        "display": "Gemini 2.5 Flash Preview TTS",
+        "rpm": 3, "rpd": 15, "monthly_30d": 450,
+        "inputs": ["text"], "outputs": ["audio"],
+        "note": "TTS اختصاصی — نرخ و قیمت جدا در صفحه Pricing."
+    },
+    "gemini-2.5-flash-image-preview": {
+        "display": "Gemini 2.5 Flash Image (preview)",
+        "rpm": None, "rpd": None, "monthly_30d": None,
+        "inputs": ["images","text"], "outputs": ["images","text"],
+        "note": "محدودیت‌های preview و قیمت در مستندات."
+    },
+    "gemini-2.0-flash": {
+        "display": "Gemini 2.0 Flash",
+        "rpm": 15, "rpd": 200, "monthly_30d": 6000,
+        "inputs": ["audio","images","video","text"], "outputs": ["text"],
+        "note": "نسل قبلی Flash؛ مناسب realtime و استریم."
+    },
+    "gemini-2.0-flash-preview-image-generation": {
+        "display": "Gemini 2.0 Flash Preview Image Gen",
+        "rpm": 10, "rpd": 100, "monthly_30d": 3000,
+        "inputs": ["audio","images","video","text"], "outputs": ["text","images"],
+        "note": "محدودیت جدا برای تولید تصویر."
+    },
+    "gemini-embeddings": {
+        "display": "Gemini Embeddings",
+        "rpm": 100, "rpd": 1000, "monthly_30d": 30000,
+        "inputs": ["text"], "outputs": ["vector embeddings"],
+        "note": "مخصوص استخراج embeddings؛ نرخ و throughput بالاتر."
+    },
+    "gemma-3": {
+        "display": "Gemma 3 & 3n",
+        "rpm": 30, "rpd": 14400, "monthly_30d": 432000,
+        "inputs": ["text","multimodal"], "outputs": ["text","vectors"],
+        "note": "برای بارهای بزرگ و throughput بالا مناسب است."
+    },
+    "gemini-1.5-flash": {
+        "display": "Gemini 1.5 Flash (deprecated)",
+        "rpm": 15, "rpd": 50, "monthly_30d": 1500,
+        "inputs": ["audio","images","video","text"], "outputs": ["text"],
+        "note": "در حال Deprecated؛ هنوز در برخی فهرست‌ها دیده می‌شود."
+    },
+}
+```eof
+
+---
+
+### **فایل ۲: `Saino.py`**
+
+این نسخه نهایی و کامل برنامه است که به فایل `model.py` وابسته است.
+
+```python:Saino Main App:Saino.py
+# -*- coding: utf-8 -*-
+# Saino Elite - نسخه 5.0 (کامل، ماژولار و نهایی)
+# فایل اصلی برنامه
 
 # ----------------------------------------------------------------------
 # بخش ۱: وارد کردن کتابخانه‌ها
@@ -13,7 +108,6 @@ import importlib
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple, Literal, Type
 
 # --- کتابخانه‌های شخص ثالث ---
@@ -23,20 +117,25 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field as PydanticField
 
 import chainlit as cl
+from chainlit import Element, Message, File, Select, SelectItem, Action, ActionList
 import google.generativeai as genai
-# [تغییر ۱]: SafetySetting از این خط حذف شد زیرا در نسخه‌های جدید منسوخ شده است
 from google.generativeai.types import FunctionDeclaration, Tool, HarmCategory
 import pandas as pd
 from pypdf import PdfReader
 import docx
 from tavily import TavilyClient
 
+# [تغییر مهم]: وارد کردن BaseTool از ماژول جدید
+from tools.base import BaseTool
+
+# [تغییر جدید]: وارد کردن MODEL_INFO از فایل کانفیگ جدا
+from model import MODEL_INFO
+
 # ----------------------------------------------------------------------
 # بخش ۲: پیکربندی و راه‌اندازی
 # ----------------------------------------------------------------------
 load_dotenv()
-Path("tools").mkdir(exist_ok=True) # اطمینان از وجود پوشه tools
-
+Path("tools").mkdir(exist_ok=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("saino_elite_v5")
 
@@ -85,12 +184,6 @@ class DocumentChunk(BaseDBModel): workspace_id: str; file_name: str; content: st
 # ----------------------------------------------------------------------
 # بخش ۴: معماری ابزارهای پویا
 # ----------------------------------------------------------------------
-class BaseTool(ABC):
-    name: str; description: str; parameters: Dict
-    @abstractmethod
-    async def execute(self, **kwargs) -> Dict: pass
-    def get_declaration(self) -> FunctionDeclaration: return FunctionDeclaration(name=self.name, description=self.description, parameters=self.parameters)
-
 class ToolLoader:
     def __init__(self, tool_dir: str = "tools"): self.tool_dir = Path(tool_dir)
     def load_tools(self) -> List[BaseTool]:
@@ -118,7 +211,6 @@ class ToolManager:
         self.loader = ToolLoader()
         self.tools: Dict[str, BaseTool] = {}
         self.reload_tools()
-    def reload_tools(self): self.tools = {tool.name: tool for tool in self.loader.load_tools()}
     def get_all_declarations(self) -> List[FunctionDeclaration]: return [t.get_declaration() for t in self.tools.values()]
     async def execute_tool(self, name: str, **kwargs) -> Dict:
         if name not in self.tools: return {"status": "error", "error": f"ابزار '{name}' یافت نشد."}
@@ -161,9 +253,9 @@ DB = DatabaseManager()
 class ModelManager:
     def __init__(self):
         self._models = {}
-        model_names = ["gemini-1.5-pro-latest", "gemini-1.5-flash-latest", "gemini-pro"]
-        # [تغییر ۲]: ساختار safety_settings به فرمت دیکشنری که در نسخه‌های جدید لازم است، تغییر کرد
-        self.safety_settings = [{"category": hc, "threshold": "BLOCK_NONE"} for hc in HarmCategory]
+        # [تغییر جدید]: بارگذاری مدل‌ها از دیکشنری MODEL_INFO
+        model_names = list(MODEL_INFO.keys())
+        self.safety_settings = [{"category": hc, "threshold": "BLOCK_NONE"} for hc in genai.types.HarmCategory]
         for name in model_names:
             try:
                 self._models[name] = genai.GenerativeModel(model_name=name, safety_settings=self.safety_settings)
@@ -263,9 +355,17 @@ class ChatProcessor:
             model_response_with_tools = f"[فراخوانی ابزار: {', '.join([tc.name for tc in tool_calls])}]"
             await self.db.insert_one("messages", Message(workspace_id=workspace_id, conv_id=conv_id, role="model", content=model_response_with_tools, user_id=user_id))
             
-            tasks = [self.tools.execute_tool(tc.name, **dict(tc.args)) for tc in tool_calls]
-            tool_results = await asyncio.gather(*tasks)
-
+            tool_results = []
+            
+            # [تغییر مهم]: مدیریت خطا برای اجرای ابزار
+            for tc in tool_calls:
+                try:
+                    res = await self.tools.execute_tool(tc.name, **dict(tc.args))
+                    tool_results.append(res)
+                except Exception as e:
+                    logger.exception(f"❌ خطای اجرایی در ابزار {tc.name}: {e}")
+                    tool_results.append({"status": "error", "error": f"خطا در اجرای ابزار '{tc.name}': {str(e)}"})
+            
             tool_response_parts = [{"tool_response": {"name": tc.name, "response": res}} for tc, res in zip(tool_calls, tool_results)]
             
             history.append({"role": "model", "parts": [{"function_call": tc} for tc in tool_calls]})
@@ -281,13 +381,11 @@ PROCESSOR = ChatProcessor(DB, TOOLS, MODELS)
 # ----------------------------------------------------------------------
 # بخش ۸: رابط کاربری و مدیریت رویدادها
 # ----------------------------------------------------------------------
-# (بدون تغییر در این بخش)
 @cl.on_chat_start
 async def on_chat_start():
     await DB.connect()
     user = cl.user_session.get("user")
     if not user:
-        # Chainlit should handle redirecting to login
         await cl.Message("لطفاً ابتدا با حساب خود وارد شوید.").send()
         return
 
@@ -341,7 +439,6 @@ async def on_action(action: cl.Action):
     if action.name == ACTION.SELECT_WORKSPACE:
         if action.value != ws_id:
             cl.user_session.set("workspace_id", action.value); cl.user_session.set("current_conv_id", None)
-            # Re-initialize the chat view for the new workspace
             await on_chat_start() 
 
     elif action.name == ACTION.NEW_CONV:
@@ -417,3 +514,4 @@ async def on_action(action: cl.Action):
     elif action.name == ACTION.CONFIRM_DELETE_MEMORY:
         await DB.delete_one("memories", {"_id": action.value, "user_id": user_id})
         await cl.Message("خاطره حذف شد.").send()
+```eof
