@@ -5,7 +5,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Literal
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -34,8 +34,8 @@ cl.set_settings({
     "Project": {
         "name": "Saino-AI",
         "author": "𝕚𝕞_𝕒𝕓𝕚e",
-        "description": "یک چت‌بات با قابلیت‌های پیشرفته و استفاده از Gemini 1.5 Pro و ابزارهای خارجی.",
-        "version": "1.1",
+        "description": "یک چت‌بات با قابلیت‌های پیشرفته و استفاده از مدل‌های چندگانه Gemini 2.5 و ابزارهای خارجی.",
+        "version": "1.2",
         "features": {
             "oauth": {
                 "google": False,
@@ -89,11 +89,6 @@ if not CFG.GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY در فایل .env تنظیم نشده است.")
 if not CFG.TAVILY_API_KEY:
     logging.warning("TAVILY_API_KEY در فایل .env تنظیم نشده است — ابزار جستجو غیرفعال خواهد بود.")
-
-try:
-    GENAI_MODEL = GenerativeModel(model_name="gemini-1.5-pro-latest", api_key=CFG.GEMINI_API_KEY)
-except Exception as e:
-    raise RuntimeError(f"خطا در ایجاد مدل Gemini: {e}")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("saino")
@@ -195,6 +190,9 @@ DB = Database()
 
 # -------------------- Core Tools Plugin --------------------
 class CoreToolsPlugin:
+    """
+    مجموعه ابزارهای اصلی برای استفاده مدل.
+    """
     def __init__(self):
         self._tavily = None
         if TAVILY_AVAILABLE and CFG.TAVILY_API_KEY:
@@ -303,11 +301,66 @@ class CoreToolsPlugin:
 
 TOOLS = CoreToolsPlugin()
 
+# -------------------- Model Manager --------------------
+class ModelManager:
+    """
+    مسئول انتخاب مدل مناسب بر اساس ورودی کاربر و نوع درخواست.
+    """
+    def __init__(self):
+        self._models = {
+            "gemini-2.5-pro": GenerativeModel("gemini-2.5-pro", api_key=CFG.GEMINI_API_KEY),
+            "gemini-2.5-flash": GenerativeModel("gemini-2.5-flash", api_key=CFG.GEMINI_API_KEY),
+            "gemini-2.5-flash-lite": GenerativeModel("gemini-2.5-flash-lite", api_key=CFG.GEMINI_API_KEY),
+            "gemini-2.5-flash-preview-tts": GenerativeModel("gemini-2.5-flash-preview-tts", api_key=CFG.GEMINI_API_KEY),
+            "gemini-2.5-flash-image-preview": GenerativeModel("gemini-2.5-flash-image-preview", api_key=CFG.GEMINI_API_KEY),
+            "gemini-2.0-flash": GenerativeModel("gemini-2.0-flash", api_key=CFG.GEMINI_API_KEY),
+            "gemini-2.0-flash-preview-image-generation": GenerativeModel("gemini-2.0-flash-preview-image-generation", api_key=CFG.GEMINI_API_KEY),
+            "gemini-1.5-pro": GenerativeModel("gemini-1.5-pro", api_key=CFG.GEMINI_API_KEY),
+        }
+        
+    def get_model(self, message: cl.Message) -> GenerativeModel:
+        """
+        یک مدل را بر اساس نوع محتوای پیام انتخاب می‌کند.
+        """
+        # بررسی وجود فایل‌های چندرسانه‌ای
+        if message.elements:
+            for element in message.elements:
+                if element.type in ["image", "video", "audio"]:
+                    logger.info("مدل چندحالته برای پردازش محتوای تصویری/صوتی انتخاب شد.")
+                    return self._models.get("gemini-2.5-pro", self._models["gemini-1.5-pro"])
+        
+        # اگر ورودی فقط متن است
+        if message.content and len(message.content) > 200:
+            logger.info("مدل Pro برای پردازش متن بلند انتخاب شد.")
+            return self._models.get("gemini-2.5-pro", self._models["gemini-1.5-pro"])
+        
+        # مدل پیش‌فرض برای مکالمه‌های سریع و متنی
+        logger.info("مدل Flash برای پردازش سریع متن انتخاب شد.")
+        return self._models.get("gemini-2.5-flash", self._models["gemini-1.5-pro"])
+
+    def get_tts_model(self) -> GenerativeModel:
+        """
+        مدل TTS اختصاصی را بازمی‌گرداند.
+        """
+        return self._models.get("gemini-2.5-flash-preview-tts")
+    
+    def get_image_generation_model(self) -> GenerativeModel:
+        """
+        مدل تولید تصویر را بازمی‌گرداند.
+        """
+        return self._models.get("gemini-2.5-flash-image-preview", self._models.get("gemini-2.0-flash-preview-image-generation"))
+
+MODELS = ModelManager()
+
 # -------------------- Chat Manager --------------------
 class ChatManager:
-    def __init__(self, db: Database):
+    """
+    مسئول مدیریت جریان اصلی چت.
+    """
+    def __init__(self, db: Database, tools: CoreToolsPlugin, models: ModelManager):
         self.db = db
-        self.tools = TOOLS
+        self.tools = tools
+        self.models = models
         self.queue = asyncio.Queue()
         self._task = asyncio.create_task(self._worker())
 
@@ -342,24 +395,31 @@ class ChatManager:
             "conv_id": ObjectId(conv_id),
             "role": "user",
             "text": message.content or "",
+            "elements": [e.to_dict() for e in message.elements] if message.elements else None,
             "created_at": datetime.now(timezone.utc)
         })
 
-        await display_history(conv_id, workspace_id)
-
-        # تاریخچه مکالمه را از دیتابیس دریافت می‌کند
+        # انتخاب مدل مناسب بر اساس پیام ورودی
+        model_to_use = self.models.get_model(message)
+        
+        # آماده‌سازی تاریخچه مکالمه برای مدل
         msgs = await self.db.find("messages", workspace_id, {"conv_id": ObjectId(conv_id)}, sort=("created_at", 1), limit=10)
         formatted_history = []
         for m in msgs:
             role = "user" if m.get("role") == "user" else "model"
-            formatted_history.append({"role": role, "parts": [Part(text=m.get("text", ""))]})
-
-        model_id = (settings or {}).get("model_id") or "gemini-1.5-pro-latest"
+            parts = [Part(text=m.get("text", ""))]
+            if m.get("elements"):
+                for el in m.get("elements"):
+                    # تبدیل دوباره عناصر از dict به cl.Image/Video و غیره
+                    # در اینجا برای سادگی فقط URL را به عنوان یک Part جدید اضافه می‌کنیم
+                    if el.get("type") in ["image", "video", "audio"] and el.get("url"):
+                        parts.append(Part(text=f"[{el['type']} at {el['url']}]"))
+            formatted_history.append({"role": role, "parts": parts})
 
         async with MODEL_SEMAPHORE:
             try:
                 # فراخوانی اولیه مدل برای بررسی نیاز به ابزار
-                response = await GENAI_MODEL.generate_content_async(
+                response = await model_to_use.generate_content_async(
                     contents=formatted_history,
                     tools=[Tool(function_declarations=self.tools.get_tool_declarations())]
                 )
@@ -399,7 +459,7 @@ class ChatManager:
 
         # ارسال پاسخ ابزارها به مدل برای دریافت پاسخ نهایی
         try:
-            final_response = await GENAI_MODEL.generate_content_async(
+            final_response = await model_to_use.generate_content_async(
                 contents=formatted_history + [Part(role="function", function_responses=func_responses)]
             )
             await self._stream_and_save(conv_id, workspace_id, final_response)
@@ -446,7 +506,7 @@ class ChatManager:
             "created_at": datetime.now(timezone.utc)
         })
 
-CHAT = ChatManager(DB)
+CHAT = ChatManager(DB, TOOLS, MODELS)
 
 # -------------------- UI Handlers --------------------
 async def render_sidebar(workspace_id: str):
@@ -472,7 +532,16 @@ async def display_history(conv_id: Any, workspace_id: str):
         author = CFG.VERSION if m.get("role") == "assistant" else "User"
         msg_id = str(m["_id"])
         actions = [cl.Action(name=ACTION.REPLY_TO_MESSAGE, value=msg_id, label="ریپلای")]
-        await cl.Message(content=m.get("text",""), author=author, id=msg_id, actions=actions).send()
+        
+        elements = []
+        if m.get("elements"):
+            for el_data in m.get("elements"):
+                el_type = el_data.get("type")
+                if el_type == "image":
+                    elements.append(cl.Image(name=el_data.get("name"), url=el_data.get("url"), display=el_data.get("display")))
+                # افزودن انواع دیگر عنصر در صورت نیاز
+        
+        await cl.Message(content=m.get("text",""), author=author, id=msg_id, actions=actions, elements=elements).send()
 
 @cl.on_chat_start
 async def on_chat_start():
