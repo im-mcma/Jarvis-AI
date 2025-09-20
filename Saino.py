@@ -16,7 +16,7 @@ import chainlit as cl
 
 # Google GenAI modern SDK
 from google.generativeai import GenerativeModel
-from google.generativeai.types import FunctionDeclaration, Part, FunctionResponse
+from google.generativeai.types import FunctionDeclaration, Part, FunctionResponse, Tool
 import pandas as pd
 
 # Tavily client (optional)
@@ -30,14 +30,12 @@ except Exception:
 # -------------------- Config & Logging --------------------
 load_dotenv()
 
-# --- تنظیمات Chainlit به صورت مستقیم در کد ---
-# این بخش جایگزین فایل config.toml می‌شود.
 cl.set_settings({
     "Project": {
         "name": "Saino-AI",
         "author": "𝕚𝕞_𝕒𝕓𝕚e",
-        "description": "",
-        "version": "1.0",
+        "description": "یک چت‌بات با قابلیت‌های پیشرفته و استفاده از Gemini 1.5 Pro و ابزارهای خارجی.",
+        "version": "1.1",
         "features": {
             "oauth": {
                 "google": False,
@@ -63,7 +61,6 @@ cl.set_settings({
     "Data": {
         "disable_telemetry": True
     },
-    "Providers": {},
     "Chat": {
         "show_feedback": True,
         "thumbs_up_down": True,
@@ -75,8 +72,6 @@ cl.set_settings({
         "message_history_size": 20
     }
 })
-
-# ----------------------------------------------------
 
 @dataclass
 class Config:
@@ -91,11 +86,10 @@ class Config:
 CFG = Config()
 
 if not CFG.GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY در .env تنظیم نشده است.")
+    raise RuntimeError("GEMINI_API_KEY در فایل .env تنظیم نشده است.")
 if not CFG.TAVILY_API_KEY:
-    logging.warning("TAVILY_API_KEY در .env تنظیم نشده است — ابزار جستجو غیرفعال خواهد بود.")
+    logging.warning("TAVILY_API_KEY در فایل .env تنظیم نشده است — ابزار جستجو غیرفعال خواهد بود.")
 
-# Configure genai client
 try:
     GENAI_MODEL = GenerativeModel(model_name="gemini-1.5-pro-latest", api_key=CFG.GEMINI_API_KEY)
 except Exception as e:
@@ -134,14 +128,14 @@ class Database:
         if hasattr(self, "client") and getattr(self, "client", None):
             return
         if not CFG.MONGO_URI:
-            raise RuntimeError("MONGO_URI در .env تنظیم نشده است.")
+            raise RuntimeError("MONGO_URI در فایل .env تنظیم نشده است.")
         try:
             self.client = AsyncIOMotorClient(CFG.MONGO_URI, serverSelectionTimeoutMS=5000)
             await self.client.admin.command("ping")
             self.db = self.client[CFG.DB_NAME]
-            logger.info("✅ MongoDB connected")
+            logger.info("✅ اتصال به MongoDB برقرار شد.")
         except Exception as e:
-            logger.exception("MongoDB connection failed")
+            logger.exception("❌ اتصال به MongoDB ناموفق بود.")
             raise
 
     def _collection(self, name: str):
@@ -160,10 +154,11 @@ class Database:
         return ws_id
 
     async def delete_workspace(self, workspace_id: str):
-        for c in ["conversations", "messages", "notes", "custom_tools"]:
-            await self._collection(c).delete_many({"workspace_id": workspace_id})
+        await self._collection("conversations").delete_many({"workspace_id": workspace_id})
+        await self._collection("messages").delete_many({"workspace_id": workspace_id})
+        await self._collection("notes").delete_many({"workspace_id": workspace_id})
         await self._collection("workspaces").delete_one({"_id": workspace_id})
-        logger.warning("Workspace %s deleted", workspace_id)
+        logger.warning("فصای کاری %s حذف شد.", workspace_id)
 
     async def find(self, collection: str, workspace_id: str, query: Dict = None, sort: Optional[Tuple[str,int]] = None, limit: int = 100):
         q = {"workspace_id": workspace_id}
@@ -206,7 +201,7 @@ class CoreToolsPlugin:
             try:
                 self._tavily = TavilyClient(api_key=CFG.TAVILY_API_KEY)
             except Exception:
-                logger.exception("Tavily init failed")
+                logger.exception("⚠️ Tavily client فعال نیست. کلید API نامعتبر است.")
                 self._tavily = None
 
     def get_tool_declarations(self) -> List[FunctionDeclaration]:
@@ -244,14 +239,14 @@ class CoreToolsPlugin:
         ]
 
     async def execute(self, tool_name: str, **kwargs):
-        logger.debug("Executing tool %s with %s", tool_name, kwargs)
+        logger.debug(f"Executing tool {tool_name} with args: {kwargs}")
         if tool_name == "generate_image":
             return await self._generate_image(kwargs.get("prompt", ""))
         if tool_name == "display_table":
             return await self._display_table(kwargs.get("json_data", "[]"), kwargs.get("title", "Data"))
         if tool_name == "search":
             return await self._search(kwargs.get("query", ""))
-        return {"status": "error", "error": f"Unknown tool {tool_name}"}
+        return {"status": "error", "error": f"ابزار ناشناخته: {tool_name}"}
 
     async def _generate_image(self, prompt: str):
         m = cl.Message(content=f"در حال تولید تصویر برای: `{prompt}` ...", author="System")
@@ -263,7 +258,7 @@ class CoreToolsPlugin:
             await m.update(content=f"تصویر تولید شد برای: `{prompt}`", elements=[img])
             return {"status": "ok", "url": placeholder, "text": f"تصویر در {placeholder}"}
         except Exception as e:
-            logger.exception("Image tool failed")
+            logger.exception("❌ خطا در ابزار تولید تصویر.")
             await m.update(content=f"خطا در تولید تصویر: {e}")
             return {"status": "error", "error": str(e)}
 
@@ -271,20 +266,20 @@ class CoreToolsPlugin:
         try:
             data = json.loads(json_data)
             if not isinstance(data, list) or not all(isinstance(x, dict) for x in data):
-                return {"status": "error", "error": "Invalid JSON: must be list of objects"}
+                return {"status": "error", "error": "JSON نامعتبر: باید لیستی از اشیاء باشد."}
             df = pd.DataFrame(data)
             md = f"### {title}\n\n" + df.to_markdown(index=False)
             await cl.Message(content=md, author="Table").send()
             return {"status": "ok", "text": md}
         except Exception as e:
-            logger.exception("Table tool failed")
+            logger.exception("❌ خطا در ابزار نمایش جدول.")
             return {"status": "error", "error": str(e)}
 
     async def _search(self, query: str):
         m = cl.Message(content=f"در حال جستجو برای `{query}` ...", author="System")
         await m.send()
         if not self._tavily:
-            err = "Tavily client not available — نصب tavily-python و تنظیم TAVILY_API_KEY لازم است."
+            err = "Tavily client در دسترس نیست. نصب پکیج `tavily-python` و تنظیم `TAVILY_API_KEY` در فایل .env لازم است."
             logger.error(err)
             await m.update(content=err)
             return {"status": "error", "error": err}
@@ -302,7 +297,7 @@ class CoreToolsPlugin:
             await cl.Message(content=md, author="Search").send()
             return {"status": "ok", "results": out, "text": md}
         except Exception as e:
-            logger.exception("Search tool failed")
+            logger.exception("❌ خطا در ابزار جستجو.")
             await m.update(content=f"خطا در جستجو: {e}")
             return {"status": "error", "error": str(e)}
 
@@ -322,7 +317,7 @@ class ChatManager:
             try:
                 await self._process_message(message, workspace_id, settings)
             except Exception as e:
-                logger.exception("Processing message failed")
+                logger.exception("❌ خطا در پردازش پیام.")
                 await cl.Message(content=f"خطای داخلی: {e}", author="System").send()
             finally:
                 self.queue.task_done()
@@ -352,25 +347,24 @@ class ChatManager:
 
         await display_history(conv_id, workspace_id)
 
-        # Ensure history is correctly typed for GenAI SDK
-        msgs = await self.db.find("messages", workspace_id, {"conv_id": ObjectId(conv_id)}, sort=("created_at", 1), limit=300)
-        formatted = []
+        # تاریخچه مکالمه را از دیتابیس دریافت می‌کند
+        msgs = await self.db.find("messages", workspace_id, {"conv_id": ObjectId(conv_id)}, sort=("created_at", 1), limit=10)
+        formatted_history = []
         for m in msgs:
             role = "user" if m.get("role") == "user" else "model"
-            content = Part(text=m.get("text", ""))
-            formatted.append(Part(role=role, content=[content]))
+            formatted_history.append({"role": role, "parts": [Part(text=m.get("text", ""))]})
 
         model_id = (settings or {}).get("model_id") or "gemini-1.5-pro-latest"
 
         async with MODEL_SEMAPHORE:
             try:
+                # فراخوانی اولیه مدل برای بررسی نیاز به ابزار
                 response = await GENAI_MODEL.generate_content_async(
-                    contents=[Part(text=message.content or "")],
-                    tools=self.tools.get_tool_declarations(),
-                    history=formatted[:-1] # Exclude the user's latest message from history
+                    contents=formatted_history,
+                    tools=[Tool(function_declarations=self.tools.get_tool_declarations())]
                 )
             except Exception as e:
-                logger.exception("GenAI generate_content failed")
+                logger.exception("❌ خطا در تماس اولیه با مدل.")
                 await cl.Message(content=f"خطا در تماس با مدل: {e}", author="System").send()
                 return
 
@@ -379,76 +373,76 @@ class ChatManager:
             candidates = response.candidates
             if candidates:
                 for cand in candidates:
-                    parts = cand.content.parts
-                    for p in parts:
+                    for p in cand.content.parts:
                         if hasattr(p, "function_call"):
                             tool_calls.append(p.function_call)
         except Exception:
             tool_calls = []
 
+        # اگر ابزاری فراخوانی نشده باشد، پاسخ را استریم می‌کند
         if not tool_calls:
-            text = getattr(response, "text", "") or ""
-            await self._stream_and_save(conv_id, workspace_id, text)
+            await self._stream_and_save(conv_id, workspace_id, response)
             return
 
-        results = []
-        for tc in tool_calls:
-            try:
-                name = tc.name
-                args = tc.args
-                res = await self._safe_tool_execute(name, args)
-                results.append((tc, res))
-            except Exception as e:
-                logger.exception("Tool execution loop error")
-                results.append((tc, {"status":"error","error":str(e)}))
+        # اجرای همزمان ابزارهای فراخوانی شده
+        tasks = [self._safe_tool_execute(tc.name, tc.args) for tc in tool_calls]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Build function response parts
-        func_parts = []
-        for tc, res in results:
-            fr = FunctionResponse(name=tc.name, response={"content": str(res)})
-            func_parts.append(fr)
+        func_responses = []
+        for i, res in enumerate(results):
+            if isinstance(res, Exception):
+                logger.error(f"❌ خطا در اجرای ابزار {tool_calls[i].name}: {res}")
+                fr = FunctionResponse(name=tool_calls[i].name, response={"content": f"خطا: {res}"})
+            else:
+                fr = FunctionResponse(name=tool_calls[i].name, response={"content": str(res)})
+            func_responses.append(fr)
 
-        async with MODEL_SEMAPORE:
-            try:
-                final = await GENAI_MODEL.generate_content_async(
-                    contents=formatted[:-1] + [Part(role="user", content=[Part(text=message.content or "")])] + [Part(role="function", content=[Part(text=str(p)) for p in func_parts])],
-                    tools=self.tools.get_tool_declarations(),
-                )
-            except Exception as e:
-                logger.exception("Final genai call failed")
-                await cl.Message(content=f"خطا در دریافت پاسخ نهایی: {e}", author="System").send()
-                return
-
-        final_text = getattr(final, "text", "") or ""
-        await self._stream_and_save(conv_id, workspace_id, final_text)
+        # ارسال پاسخ ابزارها به مدل برای دریافت پاسخ نهایی
+        try:
+            final_response = await GENAI_MODEL.generate_content_async(
+                contents=formatted_history + [Part(role="function", function_responses=func_responses)]
+            )
+            await self._stream_and_save(conv_id, workspace_id, final_response)
+        except Exception as e:
+            logger.exception("❌ خطا در دریافت پاسخ نهایی از مدل.")
+            await cl.Message(content=f"خطا در دریافت پاسخ نهایی: {e}", author="System").send()
 
     async def _safe_tool_execute(self, name: str, kwargs: Dict):
         try:
             res = await asyncio.wait_for(self.tools.execute(name, **(kwargs or {})), timeout=30)
             return res
         except asyncio.TimeoutError:
-            logger.exception("Tool %s timed out", name)
+            logger.exception(f"⏰ ابزار {name} به اتمام رسید.")
             return {"status":"error","error":"timeout"}
         except Exception as e:
-            logger.exception("Tool %s exception", name)
+            logger.exception(f"❌ خطای استثنایی در ابزار {name}.")
             return {"status":"error","error": str(e)}
 
-    async def _stream_and_save(self, conv_id: Any, workspace_id: str, text: str):
+    async def _stream_and_save(self, conv_id: Any, workspace_id: str, response):
+        """
+        پاسخ مدل را به صورت استریم (جریانی) نمایش می‌دهد و سپس ذخیره می‌کند.
+        """
         msg = cl.Message(content="", author=CFG.VERSION)
         await msg.send()
+        
+        full_text = ""
         try:
-            stream = await GENAI_MODEL.generate_content_async(
-                contents=[{"role": "user", "parts": [{"text": text}]}], stream=True
-            )
-            async for chunk in stream:
-                await msg.stream_token(chunk.text)
-        except Exception:
-            await msg.update(content=text)
+            async for chunk in response:
+                text_chunk = chunk.text
+                if text_chunk:
+                    await msg.stream_token(text_chunk)
+                    full_text += text_chunk
+        except Exception as e:
+            logger.exception("❌ خطا در استریم کردن پاسخ.")
+            # اگر استریم با خطا مواجه شد، کل متن دریافت شده را نمایش می‌دهد.
+            await msg.update(content=full_text + f"\n\n**خطای استریمینگ:** {e}")
+
+        # ذخیره کامل پاسخ در دیتابیس
         await self.db.insert_one("messages", workspace_id, {
             "_id": ObjectId(),
             "conv_id": ObjectId(conv_id),
             "role": "assistant",
-            "text": text,
+            "text": full_text,
             "created_at": datetime.now(timezone.utc)
         })
 
@@ -494,7 +488,7 @@ async def on_chat_start():
         await cl.Avatar(name="User", path="./public/user.png").send()
         await cl.Avatar(name=CFG.VERSION, path="./public/assistant.png").send()
     except Exception:
-        logger.debug("Avatar not found (non-fatal).")
+        logger.debug("❌ آواتار یافت نشد.")
     await render_sidebar(ws_id)
     await cl.Message(content=f"### {CFG.VERSION}\nدر فضای کاری **{ws_id}** آماده‌ام.").send()
 
