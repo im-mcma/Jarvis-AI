@@ -35,9 +35,9 @@ load_dotenv()
 # این بخش جایگزین فایل config.toml می‌شود.
 cl.set_settings({
     "Project": {
-        "name": "Saino Elite",
-        "author": "Your Name",
-        "description": "A powerful chatbot.",
+        "name": "Saino-AI",
+        "author": "𝕚𝕞_𝕒𝕓𝕚e",
+        "description": "",
         "version": "1.0",
         "features": {
             "oauth": {
@@ -71,7 +71,7 @@ cl.set_settings({
         "voting_threshold": 1,
         "on_message_timeout": 60,
         "on_chat_start_timeout": 60,
-        "show_agent_logs": False,
+        "show_agent_logs": True,
         "stream_timeout": 120,
         "message_history_size": 20
     }
