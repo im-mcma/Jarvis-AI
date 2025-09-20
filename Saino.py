@@ -1,4 +1,4 @@
-# --- فایل: main.py (نسخه نهایی و کامل - اصلاح شده توسط Gemini) ---
+# --- فایل: main.py (نسخه نهایی و کامل - سازگار با نیازمندی‌های مشخص شده) ---
 
 import os
 import sys
@@ -18,10 +18,12 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field as PydanticField, ValidationError
 import aiofiles
+import pandas as pd
+import aiohttp
 
 # Import از مسیرهای صحیح Chainlit v2.8.0
 from chainlit.components import Select, SelectItem, Action, ActionList
-from chainlit import Message, File, Image, Audio, Text, Slider # Slider در ریشه chainlit قرار دارد
+from chainlit import Message, File, Text, Slider # حذف Image, Audio چون استفاده نشده‌اند
 import chainlit as cl
 
 import google.generativeai as genai
@@ -31,8 +33,15 @@ import docx
 import backoff
 
 # Import ابزارهای سفارشی و پیکربندی مدل
-from tools.base import BaseTool
-from model_config import MODEL_INFO
+# نکته: مطمئن شوید این دو فایل در کنار main.py وجود دارند
+try:
+    from tools.base import BaseTool
+    from model_config import MODEL_INFO
+except ImportError:
+    print("خطا: فایل‌های 'tools/base.py' و 'model_config.py' یافت نشدند.")
+    print("لطفاً از وجود این فایل‌ها در پروژه خود اطمینان حاصل کنید.")
+    sys.exit(1)
+
 
 # ----------------------------------------------------------------------
 # بخش ۱: پیکربندی و راه‌اندازی
@@ -49,7 +58,7 @@ class Config:
     TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
     OAUTH_GITHUB_CLIENT_ID: str = os.getenv("OAUTH_GITHUB_CLIENT_ID", "")
     OAUTH_GITHUB_CLIENT_SECRET: str = os.getenv("OAUTH_GITHUB_CLIENT_SECRET", "")
-    VERSION: str = "Saino Elite 5.0"
+    VERSION: str = "Saino Elite 5.1"
     DB_NAME: str = "saino_elite_v5_db"
     MAX_MODEL_CONCURRENCY: int = 5
     CHUNK_SIZE: int = 2000
@@ -91,7 +100,6 @@ class BaseDBModel(BaseModel):
 class Workspace(BaseDBModel): name: str = PydanticField(min_length=1, max_length=50)
 class Conversation(BaseDBModel): workspace_id: str; title: str = PydanticField(max_length=50)
 
-# [✨ بهبود ۱]: تغییر نام مدل برای جلوگیری از تداخل با cl.Message
 class DBMessage(BaseDBModel):
     workspace_id: str
     conv_id: str
@@ -186,7 +194,6 @@ class DatabaseManager:
 
     async def insert_one(self, coll: str, doc: BaseModel):
         data = doc.model_dump(by_alias=True)
-        # ObjectId از روی id استرینگ ساخته می‌شود
         data['_id'] = ObjectId(data['_id'])
         return await self._get_collection(coll).insert_one(data)
 
@@ -249,26 +256,32 @@ class ChatProcessor:
 
     async def _process_file_task(self, element: cl.File, workspace_id: str, user_id: str) -> bool:
         content = ""
+        file_name = element.name
         try:
-            if element.path:
-                async with aiofiles.open(element.path, mode="rb") as f:
-                    if "pdf" in element.mime:
-                        reader = PdfReader(f)
-                        content = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-                    elif "word" in element.mime:
-                        # [✅ رفع خطا]: جداسازی دستورات و اصلاح گرامر join
-                        doc = docx.Document(f)
-                        content = "\n".join([p.text for p in doc.paragraphs])
-                    else: # برای فایل‌های متنی ساده
-                        file_content = await f.read()
-                        content = file_content.decode("utf-8", errors="ignore")
+            if not element.path:
+                logger.warning(f"فایل {file_name} مسیر مشخصی ندارد.")
+                return False
+
+            async with aiofiles.open(element.path, mode="rb") as f:
+                if "pdf" in element.mime:
+                    reader = PdfReader(f)
+                    content = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+                elif "word" in element.mime:
+                    doc = docx.Document(f)
+                    content = "\n".join([p.text for p in doc.paragraphs])
+                elif "csv" in element.mime or "excel" in element.mime or "spreadsheet" in element.mime:
+                    df = pd.read_excel(f) if "excel" in element.mime else pd.read_csv(f)
+                    content = f"محتوای فایل CSV/Excel '{file_name}':\n{df.to_string()}"
+                else: # برای فایل‌های متنی ساده
+                    file_content = await f.read()
+                    content = file_content.decode("utf-8", errors="ignore")
         except Exception as e:
-            logger.error(f"❌ خطای پردازش فایل {element.name}: {e}", exc_info=True)
-            await cl.ErrorMessage(f"خطا در پردازش فایل {element.name}: {e}").send()
+            logger.error(f"❌ خطای پردازش فایل {file_name}: {e}", exc_info=True)
+            await cl.ErrorMessage(f"خطا در پردازش فایل {file_name}: {e}").send()
             return False
 
         if not content.strip():
-            logger.warning(f"⚠️ محتوایی برای پردازش در فایل {element.name} یافت نشد.")
+            logger.warning(f"⚠️ محتوایی برای پردازش در فایل {file_name} یافت نشد.")
             return False
 
         chunks_to_insert = []
@@ -276,7 +289,7 @@ class ChatProcessor:
             chunk_text = content[i:i + CFG.CHUNK_SIZE]
             chunk_doc = DocumentChunk(
                 workspace_id=workspace_id, user_id=user_id,
-                file_name=element.name, content=chunk_text
+                file_name=file_name, content=chunk_text
             )
             chunks_to_insert.append(chunk_doc.model_dump(by_alias=True))
         
@@ -285,17 +298,18 @@ class ChatProcessor:
         return True
 
     async def _process_files(self, message: cl.Message, workspace_id: str, user_id: str):
-        text_elements = [el for el in message.elements if isinstance(el, (File, Text))]
-        if not text_elements: return
+        # پردازش تمام فایل‌های ضمیمه شده
+        files = [el for el in message.elements if isinstance(el, File)]
+        if not files: return
         
         msg = cl.Message(content="⏳ در حال پردازش فایل‌های آپلود شده...", author="System")
         await msg.send()
         
-        tasks = [self._process_file_task(el, workspace_id, user_id) for el in text_elements]
+        tasks = [self._process_file_task(f, workspace_id, user_id) for f in files]
         results = await asyncio.gather(*tasks)
 
         success_count = sum(1 for r in results if r)
-        await msg.update(content=f"✅ {success_count} فایل با موفقیت پردازش و به پایگاه دانش اضافه شد.")
+        await msg.update(content=f"✅ {success_count} فایل از {len(files)} فایل با موفقیت پردازش و به پایگاه دانش اضافه شد.")
 
     async def _get_or_create_conversation(self, message: cl.Message, workspace_id: str, user_id: str) -> str:
         conv_id = cl.user_session.get("current_conv_id")
@@ -311,7 +325,6 @@ class ChatProcessor:
         messages = await self.db.find("messages", {"conv_id": conv_id}, DBMessage, s=("created_at", 1), l=100)
         history = []
         for m in messages:
-            # نقش 'assistant' به 'model' برای Gemini API تبدیل می‌شود
             role = "model" if m.role == "assistant" else m.role
             history.append({"role": role, "parts": [{"text": m.content}]})
         return history
@@ -330,7 +343,7 @@ class ChatProcessor:
             if message.elements:
                 await self._process_files(message, workspace_id, user_id)
 
-            if not message.content:
+            if not message.content.strip():
                 logger.info("پیام خالی دریافت شد (فقط فایل ضمیمه). پردازش متوقف شد.")
                 return
 
@@ -348,12 +361,13 @@ class ChatProcessor:
             
             @backoff.on_exception(backoff.expo, (genai.types.StopCandidateException, genai.types.BlockedPromptException), max_tries=3)
             async def generate_content_with_retry():
-                return await model.generate_content_async(
-                    history,
-                    stream=True,
-                    tools=[Tool(function_declarations=self.tools.get_all_declarations())],
-                    generation_config=genai.types.GenerationConfig(temperature=settings.temperature)
-                )
+                async with MODEL_SEMAPHORE: # کنترل همزمانی درخواست‌ها
+                    return await model.generate_content_async(
+                        history,
+                        stream=True,
+                        tools=[Tool(function_declarations=self.tools.get_all_declarations())],
+                        generation_config=genai.types.GenerationConfig(temperature=settings.temperature)
+                    )
 
             response_stream = await generate_content_with_retry()
             await self._handle_stream_and_tools(response_stream, history, model, workspace_id, conv_id, user_id)
@@ -398,12 +412,10 @@ class ChatProcessor:
                 else:
                     tool_response_parts.append({"tool_response": {"name": tc.name, "response": res}})
 
-            # کل فراخوانی‌های ابزار در یک turn به تاریخچه اضافه می‌شوند
             history.append({"role": "model", "parts": [{"function_call": tc} for tc in tool_calls]})
             history.append({"role": "tool", "parts": tool_response_parts})
 
             final_stream = await model.generate_content_async(history, stream=True)
-            # فراخوانی بازگشتی برای پردازش پاسخ نهایی مدل
             await self._handle_stream_and_tools(final_stream, history, model, workspace_id, conv_id, user_id)
         
         elif text_response.strip():
@@ -421,7 +433,6 @@ PROCESSOR = ChatProcessor(DB, TOOLS, MODELS)
 async def on_chat_start():
     user = cl.user_session.get("user")
     if not user:
-        # این پیام در صورتی نمایش داده می‌شود که احراز هویت فعال باشد ولی کاربر وارد نشده باشد
         await cl.Message("لطفاً ابتدا با حساب خود وارد شوید.").send()
         return
 
@@ -451,7 +462,7 @@ async def on_chat_start():
     await cl.Message(content=f"### سلام {user.username}!\nبه {CFG.VERSION} خوش آمدید.").send()
 
 async def render_sidebar(user_id: str, active_ws_id: str):
-    workspaces = await DB.find("workspaces", {"user_id": user_id}, Workspace)
+    workspaces = await DB.find("workspaces", {"user_id": user_id}, Workspace, s=("created_at", 1))
     ws_items = [SelectItem(id=ws.id, label=ws.name) for ws in workspaces]
     convs = await DB.find("conversations", {"workspace_id": active_ws_id}, Conversation, s=("created_at", -1), l=20)
     conv_actions = [Action(name=ACTION.SELECT_CONV, value=c.id, label=f"💬 {c.title}") for c in convs]
@@ -470,7 +481,8 @@ async def display_chat_history(conv_id: str):
     await cl.empty_chat()
     messages = await DB.find("messages", {"conv_id": conv_id}, DBMessage, s=("created_at", 1))
     for msg in messages:
-        author = CFG.VERSION if msg.role == "assistant" else user.username if (user := cl.user_session.get("user")) else "User"
+        user = cl.user_session.get("user")
+        author = CFG.VERSION if msg.role == "assistant" else user.username if user else "User"
         await cl.Message(content=msg.content, author=author).send()
 
 @cl.on_message
@@ -518,7 +530,7 @@ async def handle_select_workspace(action: cl.Action, user_id: str, ws_id: str):
     if action.value and action.value != ws_id:
         cl.user_session.set("workspace_id", action.value)
         cl.user_session.set("current_conv_id", None)
-        await on_chat_start() # این تابع صفحه را کامل بازسازی می‌کند
+        await on_chat_start()
 
 async def handle_new_conv(action: cl.Action, user_id: str, ws_id: str):
     cl.user_session.set("current_conv_id", None)
@@ -559,7 +571,6 @@ async def handle_save_settings(action: cl.Action, user_id: str, ws_id: str):
 async def handle_manage_workspaces(action: cl.Action, user_id: str, ws_id: str):
     workspaces = await DB.find("workspaces", {"user_id": user_id}, Workspace)
     actions = [Action(name=ACTION.ADD_WORKSPACE, label="➕ ایجاد فضای جدید")]
-    # فقط اگر بیش از یک فضای کاری وجود داشته باشد، امکان حذف را نمایش بده
     if len(workspaces) > 1:
         actions.extend([Action(name=ACTION.DELETE_WORKSPACE, value=ws.id, label=f"🗑️ حذف '{ws.name}'") for ws in workspaces])
     await cl.AskActionMessage("مدیریت فضاها", actions=actions).send()
@@ -573,7 +584,6 @@ async def handle_add_workspace(action: cl.Action, user_id: str, ws_id: str):
             return
         
         try:
-            # اعتبارسنجی با Pydantic قبل از ذخیره
             new_ws = Workspace(user_id=user_id, name=name)
         except ValidationError as e:
             await cl.ErrorMessage(f"خطا در نام‌گذاری: {e}").send()
@@ -596,10 +606,9 @@ async def handle_confirm_delete_workspace(action: cl.Action, user_id: str, ws_id
     if not action.value: return
     try:
         await DB.delete_workspace_cascade(action.value, user_id)
-        # اگر فضای کاری فعال حذف شد، باید کاربر را به یک فضای کاری دیگر منتقل کنیم
         if action.value == ws_id:
             await cl.Message("فضای کاری فعال حذف شد. در حال بارگذاری مجدد...").send()
-            await on_chat_start() # برنامه را از نو راه‌اندازی می‌کند و اولین فضای کاری را انتخاب می‌کند
+            await on_chat_start()
         else:
             await render_sidebar(user_id, ws_id)
             await cl.Message("✅ فضای کاری حذف شد.").send()
@@ -607,40 +616,4 @@ async def handle_confirm_delete_workspace(action: cl.Action, user_id: str, ws_id
         await cl.ErrorMessage("شناسه فضای کاری نامعتبر است.").send()
     except Exception as e:
         logger.exception("❌ خطای حذف فضای کاری")
-        await cl.ErrorMessage("خطا در حذف فضای کاری. لطفاً مجدداً تلاش کنید.").send()
-
-async def handle_show_memory(action: cl.Action, user_id: str, ws_id: str):
-    memories = await DB.find("memories", {"user_id": user_id, "workspace_id": ws_id}, Memory)
-    msg_actions = [Action(name=ACTION.ADD_MEMORY, label="➕ افزودن به حافظه")]
-    content = f"### 🧠 حافظه بلندمدت (فضای کاری فعلی)\n\n"
-    if memories:
-        for i, mem in enumerate(memories):
-            content += f"{i+1}. {mem.content}\n"
-            msg_actions.append(Action(name=ACTION.DELETE_MEMORY, value=mem.id, label=f"🗑️ حذف خاطره شماره {i+1}"))
-        await cl.Message(content=content, actions=msg_actions).send()
-    else:
-        await cl.AskActionMessage("حافظه این فضای کاری خالی است.", actions=[Action(name=ACTION.ADD_MEMORY, label="➕ افزودن به حافظه")]).send()
-
-async def handle_add_memory(action: cl.Action, user_id: str, ws_id: str):
-    res = await cl.AskUserMessage("چه چیزی را به خاطر بسپارم؟").send()
-    if res and res.get("content"):
-        mem = Memory(user_id=user_id, workspace_id=ws_id, content=res['content'])
-        await DB.insert_one("memories", mem)
-        await cl.Message("✅ به حافظه اضافه شد.").send()
-
-async def handle_delete_memory(action: cl.Action, user_id: str, ws_id: str):
-    await cl.AskActionMessage(
-        "آیا از حذف این خاطره مطمئن هستید؟",
-        actions=[Action(name=ACTION.CONFIRM_DELETE_MEMORY, value=action.value, label="⚠️ بله، حذف کن")]
-    ).send()
-
-async def handle_confirm_delete_memory(action: cl.Action, user_id: str, ws_id: str):
-    if not action.value: return
-    try:
-        await DB.delete_one("memories", {"_id": ObjectId(action.value), "user_id": user_id})
-        await cl.Message("✅ خاطره حذف شد.").send()
-    except InvalidId:
-        await cl.ErrorMessage("شناسه خاطره نامعتبر است.").send()
-    except Exception as e:
-        logger.exception("❌ خطای حذف خاطره")
-        await cl.ErrorMessage("خطا در حذف خاطره. لطفاً مجدداً تلاش کنید.").send()
+        await cl.ErrorMessage("خطا در حذف فضای کاری. لطفاً مجد...
