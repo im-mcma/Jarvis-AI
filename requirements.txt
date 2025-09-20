@@ -6,8 +6,9 @@ pandas
 aiohttp
 tavily-python
 pydantic
-dotenv
 pypdf
 python-docx
 tavily-python
-uvicorn
+aiofiles
+python-docx
+backoff
