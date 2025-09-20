@@ -15,9 +15,8 @@ from dotenv import load_dotenv
 import chainlit as cl
 
 # Google GenAI modern SDK
-from google import genai
-from google.genai import types as genai_types
-
+from google.generativeai import GenerativeModel
+from google.generativeai.types import FunctionDeclaration, Part, FunctionResponse
 import pandas as pd
 
 # Tavily client (optional)
@@ -46,7 +45,7 @@ cl.set_settings({
                 "oauth_user_info": False
             }
         },
-        "default_locale": "fa-IR", # Optional: Set to Persian or keep as en-US
+        "default_locale": "fa-IR",
         "ui": {
             "name": "Saino Elite",
             "hide_watermark": False,
@@ -97,7 +96,10 @@ if not CFG.TAVILY_API_KEY:
     logging.warning("TAVILY_API_KEY در .env تنظیم نشده است — ابزار جستجو غیرفعال خواهد بود.")
 
 # Configure genai client
-GENAI_CLIENT = genai.Client(api_key=CFG.GEMINI_API_KEY)
+try:
+    GENAI_MODEL = GenerativeModel(model_name="gemini-1.5-pro-latest", api_key=CFG.GEMINI_API_KEY)
+except Exception as e:
+    raise RuntimeError(f"خطا در ایجاد مدل Gemini: {e}")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("saino")
@@ -153,7 +155,7 @@ class Database:
         exists = await col.find_one({"name": name, "user_id": CFG.USER_ID})
         if exists:
             return None
-        ws_id = str(uuid.uuid4())
+        ws_id = str(ObjectId())
         await col.insert_one({"_id": ws_id, "name": name, "user_id": CFG.USER_ID, "created_at": datetime.now(timezone.utc)})
         return ws_id
 
@@ -181,6 +183,8 @@ class Database:
         doc = dict(document)
         doc["workspace_id"] = workspace_id
         doc["user_id"] = CFG.USER_ID
+        if "_id" not in doc:
+            doc["_id"] = ObjectId()
         if "created_at" not in doc:
             doc["created_at"] = datetime.now(timezone.utc)
         res = await self._collection(collection).insert_one(doc)
@@ -200,14 +204,14 @@ class CoreToolsPlugin:
         self._tavily = None
         if TAVILY_AVAILABLE and CFG.TAVILY_API_KEY:
             try:
-                self._tavily = TavilyClient(CFG.TAVILY_API_KEY)
+                self._tavily = TavilyClient(api_key=CFG.TAVILY_API_KEY)
             except Exception:
                 logger.exception("Tavily init failed")
                 self._tavily = None
 
-    def get_tool_declarations(self) -> List[genai_types.FunctionDeclaration]:
+    def get_tool_declarations(self) -> List[FunctionDeclaration]:
         return [
-            genai_types.FunctionDeclaration(
+            FunctionDeclaration(
                 name="generate_image",
                 description="Generate image from text prompt",
                 parameters={
@@ -216,7 +220,7 @@ class CoreToolsPlugin:
                     "required": ["prompt"],
                 },
             ),
-            genai_types.FunctionDeclaration(
+            FunctionDeclaration(
                 name="display_table",
                 description="Display JSON list of objects as a table",
                 parameters={
@@ -228,7 +232,7 @@ class CoreToolsPlugin:
                     "required": ["json_data"],
                 },
             ),
-            genai_types.FunctionDeclaration(
+            FunctionDeclaration(
                 name="search",
                 description="Perform a web search using Tavily",
                 parameters={
@@ -335,15 +339,12 @@ class ChatManager:
         if not conv_id:
             title = (message.content or "")[:120] or "مکالمه جدید"
             res = await self.db.insert_one("conversations", workspace_id, {"title": title})
-            conv_id = getattr(res, "inserted_id", None) or (res.inserted_id if hasattr(res, "inserted_id") else None)
-            if not conv_id:
-                conv_id = str(uuid.uuid4())
-                await self.db._collection("conversations").insert_one({"_id": conv_id, "title": title, "workspace_id": workspace_id, "user_id": CFG.USER_ID, "created_at": datetime.now(timezone.utc)})
+            conv_id = str(res.inserted_id)
             cl.user_session.set("current_conv_id", conv_id)
 
         await self.db.insert_one("messages", workspace_id, {
             "_id": ObjectId(),
-            "conv_id": conv_id,
+            "conv_id": ObjectId(conv_id),
             "role": "user",
             "text": message.content or "",
             "created_at": datetime.now(timezone.utc)
@@ -351,45 +352,37 @@ class ChatManager:
 
         await display_history(conv_id, workspace_id)
 
-        msgs = await self.db.find("messages", workspace_id, {"conv_id": conv_id}, sort=("created_at", 1), limit=300)
+        # Ensure history is correctly typed for GenAI SDK
+        msgs = await self.db.find("messages", workspace_id, {"conv_id": ObjectId(conv_id)}, sort=("created_at", 1), limit=300)
         formatted = []
         for m in msgs:
-            # Using genai_types.Content & Part for typed history (SDK-specific)
-            try:
-                part = genai_types.Part(text=m.get("text", ""))
-                content = genai_types.Content(role="assistant" if m.get("role") == "assistant" else "user", parts=[part])
-                formatted.append(content)
-            except Exception:
-                # Fallback: plain strings if types unavailable
-                formatted.append(genai_types.Part(text=m.get("text", "")))
+            role = "user" if m.get("role") == "user" else "model"
+            content = Part(text=m.get("text", ""))
+            formatted.append(Part(role=role, content=[content]))
 
         model_id = (settings or {}).get("model_id") or "gemini-1.5-pro-latest"
 
-        # call model under semaphore
-        async with MODEL_SEMAPORE:
+        async with MODEL_SEMAPHORE:
             try:
-                # Modern client: models.generate_content (synchronous API)
-                response = GENAI_CLIENT.models.generate_content(
-                    model=model_id,
-                    contents=formatted + [genai_types.Part(text=message.content or "")],
-                    tools=self.tools.get_tool_declarations()
+                response = await GENAI_MODEL.generate_content_async(
+                    contents=[Part(text=message.content or "")],
+                    tools=self.tools.get_tool_declarations(),
+                    history=formatted[:-1] # Exclude the user's latest message from history
                 )
             except Exception as e:
                 logger.exception("GenAI generate_content failed")
                 await cl.Message(content=f"خطا در تماس با مدل: {e}", author="System").send()
                 return
 
-        # extract tool calls (SDK may vary)
         tool_calls = []
         try:
-            candidates = getattr(response, "candidates", None) or []
+            candidates = response.candidates
             if candidates:
                 for cand in candidates:
-                    parts = getattr(cand.content, "parts", []) or []
+                    parts = cand.content.parts
                     for p in parts:
-                        fcs = getattr(p, "function_calls", None) or []
-                        if fcs:
-                            tool_calls.extend(fcs)
+                        if hasattr(p, "function_call"):
+                            tool_calls.append(p.function_call)
         except Exception:
             tool_calls = []
 
@@ -398,40 +391,28 @@ class ChatManager:
             await self._stream_and_save(conv_id, workspace_id, text)
             return
 
-        # execute tool calls sequentially/safely and collect results
         results = []
         for tc in tool_calls:
             try:
-                name = getattr(tc, "name", None) or tc.get("name")
-                args = getattr(tc, "args", None) or tc.get("args", {})
+                name = tc.name
+                args = tc.args
                 res = await self._safe_tool_execute(name, args)
                 results.append((tc, res))
             except Exception as e:
                 logger.exception("Tool execution loop error")
                 results.append((tc, {"status":"error","error":str(e)}))
 
-        # build function response parts
+        # Build function response parts
         func_parts = []
         for tc, res in results:
-            try:
-                fr = genai_types.FunctionResponse(name=getattr(tc, "name", tc.get("name")), response={"content": str(res)})
-                part = genai_types.Part(function_response=fr)
-                func_parts.append(part)
-            except Exception:
-                # fallback: simple part containing text
-                try:
-                    part = genai_types.Part(text=str(res))
-                    func_parts.append(part)
-                except Exception:
-                    func_parts.append(genai_types.Part(text=str(res)))
+            fr = FunctionResponse(name=tc.name, response={"content": str(res)})
+            func_parts.append(fr)
 
-        # send function responses back to model to get final reply
         async with MODEL_SEMAPORE:
             try:
-                final = GENAI_CLIENT.models.generate_content(
-                    model=model_id,
-                    contents=func_parts,
-                    tools=self.tools.get_tool_declarations()
+                final = await GENAI_MODEL.generate_content_async(
+                    contents=formatted[:-1] + [Part(role="user", content=[Part(text=message.content or "")])] + [Part(role="function", content=[Part(text=str(p)) for p in func_parts])],
+                    tools=self.tools.get_tool_declarations(),
                 )
             except Exception as e:
                 logger.exception("Final genai call failed")
@@ -456,12 +437,16 @@ class ChatManager:
         msg = cl.Message(content="", author=CFG.VERSION)
         await msg.send()
         try:
-            await msg.stream_token(text)
+            stream = await GENAI_MODEL.generate_content_async(
+                contents=[{"role": "user", "parts": [{"text": text}]}], stream=True
+            )
+            async for chunk in stream:
+                await msg.stream_token(chunk.text)
         except Exception:
             await msg.update(content=text)
         await self.db.insert_one("messages", workspace_id, {
             "_id": ObjectId(),
-            "conv_id": conv_id,
+            "conv_id": ObjectId(conv_id),
             "role": "assistant",
             "text": text,
             "created_at": datetime.now(timezone.utc)
@@ -488,7 +473,7 @@ async def render_sidebar(workspace_id: str):
 
 async def display_history(conv_id: Any, workspace_id: str):
     await cl.empty_chat()
-    messages = await DB.find("messages", workspace_id, {"conv_id": conv_id}, sort=("created_at", 1), limit=300)
+    messages = await DB.find("messages", workspace_id, {"conv_id": ObjectId(conv_id)}, sort=("created_at", 1), limit=300)
     for m in messages:
         author = CFG.VERSION if m.get("role") == "assistant" else "User"
         msg_id = str(m["_id"])
