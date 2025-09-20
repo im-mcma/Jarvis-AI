@@ -1,4 +1,4 @@
-# --- فایل: main.py ---
+# --- فایل: main.py (نسخه نهایی و کامل برای Chainlit 2.8) ---
 
 import os
 import sys
@@ -19,15 +19,17 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field as PydanticField, ValidationError
 import aiofiles
 
+# [اصلاح نهایی]: Import جدید برای کامپوننت‌های Chainlit 2.8.0
+from chainlit.sdk.components import Select, SelectItem, Action, ActionList
+from chainlit import Message, File, Image, Audio, Text
 import chainlit as cl
-from chainlit import Message, File, Select, SelectItem, Action, ActionList, Image, Audio, Text
+
 import google.generativeai as genai
 from google.generativeai.types import FunctionDeclaration, Tool, HarmCategory
 from pypdf import PdfReader
 import docx
 import backoff
 
-# [تغییر مهم]: وارد کردن BaseTool و MODEL_INFO از ماژول‌های جداگانه
 from tools.base import BaseTool
 from model_config import MODEL_INFO
 
@@ -317,7 +319,6 @@ class ChatProcessor:
                 await cl.Message(f"مدل '{settings.default_model}' یافت نشد.").send()
                 return
             
-            # [بهبود]: استفاده از backoff برای مدیریت خطاهای API
             @backoff.on_exception(backoff.expo, (genai.types.StopCandidateException, genai.types.BlockedPromptException), max_tries=3)
             async def generate_content_with_retry():
                 return await model.generate_content_async(
@@ -420,18 +421,18 @@ async def on_chat_start():
 
 async def render_sidebar(user_id: str, active_ws_id: str):
     workspaces = await DB.find("workspaces", {"user_id": user_id}, Workspace)
-    ws_items = [cl.SelectItem(id=ws.id, label=ws.name) for ws in workspaces]
+    ws_items = [SelectItem(id=ws.id, label=ws.name) for ws in workspaces]
     convs = await DB.find("conversations", {"workspace_id": active_ws_id}, Conversation, sort=("created_at", -1), limit=20)
-    conv_actions = [cl.Action(name=ACTION.SELECT_CONV, value=c.id, label=f"💬 {c.title}") for c in convs]
+    conv_actions = [Action(name=ACTION.SELECT_CONV, value=c.id, label=f"💬 {c.title}") for c in convs]
     main_actions = [
-        cl.Action(name=ACTION.NEW_CONV, label="➕ مکالمه جدید"),
-        cl.Action(name=ACTION.MANAGE_WORKSPACES, label="🗂️ مدیریت فضاها"),
-        cl.Action(name=ACTION.SHOW_MEMORY, label="🧠 مدیریت حافظه"),
-        cl.Action(name=ACTION.OPEN_SETTINGS, label="⚙️ تنظیمات")
+        Action(name=ACTION.NEW_CONV, label="➕ مکالمه جدید"),
+        Action(name=ACTION.MANAGE_WORKSPACES, label="🗂️ مدیریت فضاها"),
+        Action(name=ACTION.SHOW_MEMORY, label="🧠 مدیریت حافظه"),
+        Action(name=ACTION.OPEN_SETTINGS, label="⚙️ تنظیمات")
     ]
     await cl.set_sidebar_children([
-        cl.Select(id=ACTION.SELECT_WORKSPACE, items=ws_items, initial_value=active_ws_id, label="فضای کاری فعال"),
-        cl.ActionList(name="sidebar_actions", actions=main_actions + conv_actions)
+        Select(id=ACTION.SELECT_WORKSPACE, items=ws_items, initial_value=active_ws_id, label="فضای کاری فعال"),
+        ActionList(name="sidebar_actions", actions=main_actions + conv_actions)
     ])
 
 async def display_chat_history(conv_id: str):
@@ -497,12 +498,12 @@ async def handle_select_conv(action: cl.Action, user_id: str, ws_id: str):
 
 async def handle_open_settings(action: cl.Action, user_id: str, ws_id: str):
     settings: UserSettings = cl.user_session.get("settings")
-    model_items = [cl.SelectItem(id=m, label=m) for m in MODELS.get_available_models()]
+    model_items = [SelectItem(id=m, label=m) for m in MODELS.get_available_models()]
     res = await cl.AskActionMessage(
         "تنظیمات را ویرایش کنید:",
-        actions=[cl.Action(name=ACTION.SAVE_SETTINGS, label="ذخیره")],
+        actions=[Action(name=ACTION.SAVE_SETTINGS, label="ذخیره")],
         inputs=[
-            cl.Select("model", label="مدل پیش‌فرض", items=model_items, initial_value=settings.default_model),
+            Select("model", label="مدل پیش‌فرض", items=model_items, initial_value=settings.default_model),
             cl.Slider("temp", label="Temperature", min=0, max=1, step=0.1, initial=settings.temperature)
         ]
     ).send()
@@ -522,8 +523,8 @@ async def handle_save_settings(action: cl.Action, user_id: str, ws_id: str):
 
 async def handle_manage_workspaces(action: cl.Action, user_id: str, ws_id: str):
     workspaces = await DB.find("workspaces", {"user_id": user_id}, Workspace)
-    actions = [cl.Action(name=ACTION.ADD_WORKSPACE, label="➕ ایجاد فضای جدید")]
-    actions.extend([cl.Action(name=ACTION.DELETE_WORKSPACE, value=ws.id, label=f"🗑️ حذف '{ws.name}'") for ws in workspaces])
+    actions = [Action(name=ACTION.ADD_WORKSPACE, label="➕ ایجاد فضای جدید")]
+    actions.extend([Action(name=ACTION.DELETE_WORKSPACE, value=ws.id, label=f"🗑️ حذف '{ws.name}'") for ws in workspaces])
     await cl.AskActionMessage("مدیریت فضاها", actions=actions).send()
 
 async def handle_add_workspace(action: cl.Action, user_id: str, ws_id: str):
@@ -550,7 +551,7 @@ async def handle_add_workspace(action: cl.Action, user_id: str, ws_id: str):
 async def handle_delete_workspace(action: cl.Action, user_id: str, ws_id: str):
     await cl.AskActionMessage(
         f"آیا از حذف این فضای کاری مطمئن هستید؟ این عمل غیرقابل بازگشت است.",
-        actions=[cl.Action(name=ACTION.CONFIRM_DELETE_WORKSPACE, value=action.value, label="⚠️ بله، حذف کن")]
+        actions=[Action(name=ACTION.CONFIRM_DELETE_WORKSPACE, value=action.value, label="⚠️ بله، حذف کن")]
     ).send()
 
 async def handle_confirm_delete_workspace(action: cl.Action, user_id: str, ws_id: str):
@@ -569,15 +570,15 @@ async def handle_confirm_delete_workspace(action: cl.Action, user_id: str, ws_id
 
 async def handle_show_memory(action: cl.Action, user_id: str, ws_id: str):
     memories = await DB.find("memories", {"user_id": user_id, "workspace_id": ws_id}, Memory)
-    msg_actions = [cl.Action(name=ACTION.ADD_MEMORY, label="➕ افزودن به حافظه")]
+    msg_actions = [Action(name=ACTION.ADD_MEMORY, label="➕ افزودن به حافظه")]
     content = "### حافظه بلندمدت Agent\n\n"
     if memories:
         for mem in memories:
             content += f"- {mem.content} \n"
-            msg_actions.append(cl.Action(name=ACTION.DELETE_MEMORY, value=mem.id, label=f"حذف خاطره {mem.id[:4]}..."))
+            msg_actions.append(Action(name=ACTION.DELETE_MEMORY, value=mem.id, label=f"حذف خاطره {mem.id[:4]}..."))
         await cl.Message(content=content, actions=msg_actions).send()
     else:
-        await cl.AskActionMessage("حافظه خالی است.", actions=[cl.Action(name=ACTION.ADD_MEMORY, label="➕ افزودن به حافظه")]).send()
+        await cl.AskActionMessage("حافظه خالی است.", actions=[Action(name=ACTION.ADD_MEMORY, label="➕ افزودن به حافظه")]).send()
 
 async def handle_add_memory(action: cl.Action, user_id: str, ws_id: str):
     res = await cl.AskUserMessage("چه چیزی را به خاطر بسپارم؟").send()
@@ -590,7 +591,7 @@ async def handle_delete_memory(action: cl.Action, user_id: str, ws_id: str):
     mem_id = action.value
     await cl.AskActionMessage(
         "آیا از حذف این خاطره مطمئن هستید؟",
-        actions=[cl.Action(name=ACTION.CONFIRM_DELETE_MEMORY, value=mem_id, label="⚠️ بله، حذف کن")]
+        actions=[Action(name=ACTION.CONFIRM_DELETE_MEMORY, value=mem_id, label="⚠️ بله، حذف کن")]
     ).send()
 
 async def handle_confirm_delete_memory(action: cl.Action, user_id: str, ws_id: str):
