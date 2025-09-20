@@ -1,4 +1,4 @@
-# --- فایل: main.py (نسخه نهایی و کامل برای Chainlit 2.8) ---
+# --- فایل: main.py (نسخه نهایی و کامل برای Chainlit 2.8.0) ---
 
 import os
 import sys
@@ -19,8 +19,8 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field as PydanticField, ValidationError
 import aiofiles
 
-# [اصلاح نهایی]: Import جدید برای کامپوننت‌های Chainlit 2.8.0
-from chainlit.sdk.components import Select, SelectItem, Action, ActionList
+# [اصلاح نهایی و قطعی]: Import از مسیر صحیح chainlit.components
+from chainlit.components import Select, SelectItem, Action, ActionList, Slider
 from chainlit import Message, File, Image, Audio, Text
 import chainlit as cl
 
@@ -503,8 +503,8 @@ async def handle_open_settings(action: cl.Action, user_id: str, ws_id: str):
         "تنظیمات را ویرایش کنید:",
         actions=[Action(name=ACTION.SAVE_SETTINGS, label="ذخیره")],
         inputs=[
-            Select("model", label="مدل پیش‌فرض", items=model_items, initial_value=settings.default_model),
-            cl.Slider("temp", label="Temperature", min=0, max=1, step=0.1, initial=settings.temperature)
+            Select(id="model", label="مدل پیش‌فرض", items=model_items, initial_value=settings.default_model),
+            Slider(id="temp", label="Temperature", min=0, max=1, step=0.1, initial=settings.temperature)
         ]
     ).send()
 
