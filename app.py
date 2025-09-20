@@ -1,17 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""
-Saino Elite - Final single-file app updated for modern SDKs.
-
-Run:
-  chainlit run app.py
-
-Requirements:
-  pip install --upgrade google-genai chainlit motor python-dotenv pandas tavily-python aiohttp
-  (and remove old google-generativeai if present)
-"""
-
 import os
 import uuid
 import json
@@ -44,6 +30,54 @@ except Exception:
 
 # -------------------- Config & Logging --------------------
 load_dotenv()
+
+# --- تنظیمات Chainlit به صورت مستقیم در کد ---
+# این بخش جایگزین فایل config.toml می‌شود.
+cl.set_settings({
+    "Project": {
+        "name": "Saino Elite",
+        "author": "Your Name",
+        "description": "A powerful chatbot.",
+        "version": "1.0",
+        "features": {
+            "oauth": {
+                "google": False,
+                "github": False,
+                "oauth_user_info": False
+            }
+        },
+        "default_locale": "fa-IR", # Optional: Set to Persian or keep as en-US
+        "ui": {
+            "name": "Saino Elite",
+            "hide_watermark": False,
+            "theme": "dark"
+        }
+    },
+    "App": {
+        "user_env_vars": [
+            "MONGO_URI",
+            "GEMINI_API_KEY",
+            "TAVILY_API_KEY"
+        ],
+        "log_level": "INFO"
+    },
+    "Data": {
+        "disable_telemetry": True
+    },
+    "Providers": {},
+    "Chat": {
+        "show_feedback": True,
+        "thumbs_up_down": True,
+        "voting_threshold": 1,
+        "on_message_timeout": 60,
+        "on_chat_start_timeout": 60,
+        "show_agent_logs": False,
+        "stream_timeout": 120,
+        "message_history_size": 20
+    }
+})
+
+# ----------------------------------------------------
 
 @dataclass
 class Config:
@@ -332,7 +366,7 @@ class ChatManager:
         model_id = (settings or {}).get("model_id") or "gemini-1.5-pro-latest"
 
         # call model under semaphore
-        async with MODEL_SEMAPHORE:
+        async with MODEL_SEMAPORE:
             try:
                 # Modern client: models.generate_content (synchronous API)
                 response = GENAI_CLIENT.models.generate_content(
@@ -392,7 +426,7 @@ class ChatManager:
                     func_parts.append(genai_types.Part(text=str(res)))
 
         # send function responses back to model to get final reply
-        async with MODEL_SEMAPHORE:
+        async with MODEL_SEMAPORE:
             try:
                 final = GENAI_CLIENT.models.generate_content(
                     model=model_id,
@@ -486,7 +520,7 @@ async def on_message(message: cl.Message):
     reply_ctx = cl.user_session.get("reply_context")
     if reply_ctx:
         message.content = (reply_ctx or "") + "\n" + (message.content or "")
-        cl.user_session.set("reply_context", None)
+    cl.user_session.set("reply_context", None)
     CHAT.handle_new_message(message, workspace_id, settings)
 
 @cl.on_action
