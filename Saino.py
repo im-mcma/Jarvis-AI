@@ -19,9 +19,10 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field as PydanticField, ValidationError
 import aiofiles
 
-# [اصلاح نهایی و قطعی]: Import از مسیر صحیح chainlit.components
-from chainlit.components import Select, SelectItem, Action, ActionList, Slider
-from chainlit import Message, File, Image, Audio, Text
+# [اصلاح نهایی و قطعی]: Import از مسیرهای صحیح
+from chainlit.components import Select, SelectItem, Action, ActionList
+# Slider به مسیر اصلی chainlit منتقل شده
+from chainlit import Message, File, Image, Audio, Text, Slider
 import chainlit as cl
 
 import google.generativeai as genai
@@ -242,7 +243,7 @@ class ChatProcessor:
                     if "pdf" in element.mime:
                         reader = PdfReader(f); content = "\n".join([p.extract_text() for p in reader.pages])
                     elif "word" in element.mime:
-                        doc = docx.Document(f); content = "\n".join([p.text for p in doc.paragraphs])
+                        doc = docx.Document(f); content = "\n.join([p.text for p in doc.paragraphs])
                     else:
                         content = (await f.read()).decode("utf-8")
         except Exception as e:
