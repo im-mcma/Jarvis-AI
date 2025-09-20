@@ -616,4 +616,4 @@ async def handle_confirm_delete_workspace(action: cl.Action, user_id: str, ws_id
         await cl.ErrorMessage("شناسه فضای کاری نامعتبر است.").send()
     except Exception as e:
         logger.exception("❌ خطای حذف فضای کاری")
-        await cl.ErrorMessage("خطا در حذف فضای کاری. لطفاً مجد...
+        await cl.ErrorMessage("خطا در حذف فضای کاری. لطفاً مجدداً تلاش کنید.").send()
