@@ -1,20 +1,10 @@
-# -*- coding: utf-8 -*-
-# Saino Elite - نسخه 5.0 (کامل، ماژولار و نهایی)
-# این نسخه با بازگرداندن تمام بخش‌ها و پیاده‌سازی کامل معماری ابزار ارائه شده است.
-
-# ----------------------------------------------------------------------
-# بخش ۱: نیازمندی‌ها و وارد کردن کتابخانه‌ها
-# ----------------------------------------------------------------------
-# نیازمندی‌ها (در ترمینال اجرا کنید):
-# pip install "chainlit>=1.0.0" "google-generativeai>=0.5.0" motor python-dotenv pantic pandas pypdf python-docx "tavily-python>=0.3.0" aiohttp
-
-# --- کتابخانه‌های استاندارد ---
 import os
 import sys
 import json
 import asyncio
 import logging
 import importlib
+import importlib.util
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -33,13 +23,16 @@ from google.generativeai.types import FunctionDeclaration, Tool, HarmCategory, S
 import pandas as pd
 from pypdf import PdfReader
 import docx
-from tavily import TavilyClient
+try:
+    from tavily import TavilyClient
+except Exception:
+    TavilyClient = None
 
 # ----------------------------------------------------------------------
 # بخش ۲: پیکربندی و راه‌اندازی
 # ----------------------------------------------------------------------
 load_dotenv()
-Path("tools").mkdir(exist_ok=True) # اطمینان از وجود پوشه tools
+Path("tools").mkdir(exist_ok=True)  # اطمینان از وجود پوشه tools
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("saino_elite_v5")
@@ -56,19 +49,31 @@ class Config:
     MAX_MODEL_CONCURRENCY: int = 5
     CHUNK_SIZE: int = 2000
     CHUNK_OVERLAP: int = 200
+
 CFG = Config()
 
 if not all([CFG.MONGO_URI, CFG.GEMINI_API_KEY]):
     raise RuntimeError("❌ متغیرهای MONGO_URI و GEMINI_API_KEY باید تنظیم شوند.")
+
+# Configure the Google Generative AI client
 genai.configure(api_key=CFG.GEMINI_API_KEY)
 
 MODEL_SEMAPHORE = asyncio.Semaphore(CFG.MAX_MODEL_CONCURRENCY)
 
 class ACTION:
-    NEW_CONV="nc"; SELECT_CONV="sc"; OPEN_SETTINGS="os"; MANAGE_WORKSPACES="mw"
-    ADD_WORKSPACE="aw"; DELETE_WORKSPACE="dw"; CONFIRM_DELETE_WORKSPACE="cdw"
-    SELECT_WORKSPACE="sw"; SAVE_SETTINGS="ss"; SHOW_MEMORY="sm"; ADD_MEMORY="am"
-    DELETE_MEMORY="dm"; CONFIRM_DELETE_MEMORY="cdm"
+    NEW_CONV = "nc"
+    SELECT_CONV = "sc"
+    OPEN_SETTINGS = "os"
+    MANAGE_WORKSPACES = "mw"
+    ADD_WORKSPACE = "aw"
+    DELETE_WORKSPACE = "dw"
+    CONFIRM_DELETE_WORKSPACE = "cdw"
+    SELECT_WORKSPACE = "sw"
+    SAVE_SETTINGS = "ss"
+    SHOW_MEMORY = "sm"
+    ADD_MEMORY = "am"
+    DELETE_MEMORY = "dm"
+    CONFIRM_DELETE_MEMORY = "cdm"
 
 # ----------------------------------------------------------------------
 # بخش ۳: مدل‌های داده Pydantic
@@ -77,32 +82,63 @@ class BaseDBModel(BaseModel):
     id: str = PydanticField(default_factory=lambda: str(ObjectId()), alias="_id")
     created_at: datetime = PydanticField(default_factory=lambda: datetime.now(timezone.utc))
     user_id: str
-    class Config: populate_by_name = True; json_encoders = {ObjectId: str}
 
-class Workspace(BaseDBModel): name: str
-class Conversation(BaseDBModel): workspace_id: str; title: str
-class Message(BaseDBModel): workspace_id: str; conv_id: str; role: str; content: str
-class UserSettings(BaseDBModel): default_model: str = "gemini-1.5-flash-latest"; temperature: float = 0.7
-class Memory(BaseDBModel): workspace_id: str; content: str
-class DocumentChunk(BaseDBModel): workspace_id: str; file_name: str; content: str
+    class Config:
+        populate_by_name = True
+        json_encoders = {ObjectId: str}
+
+class Workspace(BaseDBModel):
+    name: str
+
+class Conversation(BaseDBModel):
+    workspace_id: str
+    title: str
+
+class Message(BaseDBModel):
+    workspace_id: str
+    conv_id: str
+    role: str
+    content: str
+
+class UserSettings(BaseDBModel):
+    default_model: str = "gemini-2.5-flash"
+    temperature: float = 0.7
+
+class Memory(BaseDBModel):
+    workspace_id: str
+    content: str
+
+class DocumentChunk(BaseDBModel):
+    workspace_id: str
+    file_name: str
+    content: str
 
 # ----------------------------------------------------------------------
 # بخش ۴: معماری ابزارهای پویا
 # ----------------------------------------------------------------------
 class BaseTool(ABC):
-    name: str; description: str; parameters: Dict
+    name: str
+    description: str
+    parameters: Dict
+
     @abstractmethod
-    async def execute(self, **kwargs) -> Dict: pass
-    def get_declaration(self) -> FunctionDeclaration: return FunctionDeclaration(name=self.name, description=self.description, parameters=self.parameters)
+    async def execute(self, **kwargs) -> Dict:
+        pass
+
+    def get_declaration(self) -> FunctionDeclaration:
+        return FunctionDeclaration(name=self.name, description=self.description, parameters=self.parameters)
 
 class ToolLoader:
-    def __init__(self, tool_dir: str = "tools"): self.tool_dir = Path(tool_dir)
+    def __init__(self, tool_dir: str = "tools"):
+        self.tool_dir = Path(tool_dir)
+
     def load_tools(self) -> List[BaseTool]:
-        tools = []
+        tools: List[BaseTool] = []
         for file in self.tool_dir.glob("*.py"):
             module_name = f"{self.tool_dir.name}.{file.stem}"
             try:
-                if module_name in sys.modules: module = importlib.reload(sys.modules[module_name])
+                if module_name in sys.modules:
+                    module = importlib.reload(sys.modules[module_name])
                 else:
                     spec = importlib.util.spec_from_file_location(module_name, file)
                     module = importlib.util.module_from_spec(spec)
@@ -114,7 +150,8 @@ class ToolLoader:
                     if isinstance(obj, type) and issubclass(obj, BaseTool) and obj is not BaseTool:
                         tools.append(obj())
                         logger.info(f"✅ ابزار '{obj.name}' از {file.name} بارگذاری شد.")
-            except Exception as e: logger.error(f"❌ خطا در بارگذاری ابزار از {file.name}: {e}")
+            except Exception as e:
+                logger.error(f"❌ خطا در بارگذاری ابزار از {file.name}: {e}")
         return tools
 
 class ToolManager:
@@ -122,12 +159,22 @@ class ToolManager:
         self.loader = ToolLoader()
         self.tools: Dict[str, BaseTool] = {}
         self.reload_tools()
-    def reload_tools(self): self.tools = {tool.name: tool for tool in self.loader.load_tools()}
-    def get_all_declarations(self) -> List[FunctionDeclaration]: return [t.get_declaration() for t in self.tools.values()]
+
+    def reload_tools(self):
+        self.tools = {tool.name: tool for tool in self.loader.load_tools()}
+
+    def get_all_declarations(self) -> List[FunctionDeclaration]:
+        return [t.get_declaration() for t in self.tools.values()]
+
     async def execute_tool(self, name: str, **kwargs) -> Dict:
-        if name not in self.tools: return {"status": "error", "error": f"ابزار '{name}' یافت نشد."}
-        try: return await self.tools[name].execute(**kwargs)
-        except Exception as e: logger.exception(f"❌ خطای بحرانی در ابزار {name}"); return {"status": "error", "error": str(e)}
+        if name not in self.tools:
+            return {"status": "error", "error": f"ابزار '{name}' یافت نشد."}
+        try:
+            return await self.tools[name].execute(**kwargs)
+        except Exception as e:
+            logger.exception(f"❌ خطای بحرانی در ابزار {name}")
+            return {"status": "error", "error": str(e)}
+
 TOOLS = ToolManager()
 
 # ----------------------------------------------------------------------
@@ -135,43 +182,161 @@ TOOLS = ToolManager()
 # ----------------------------------------------------------------------
 class DatabaseManager:
     _client = None
+
     async def connect(self):
-        if self._client: return
+        if self._client:
+            return
         self._client = AsyncIOMotorClient(CFG.MONGO_URI, serverSelectionTimeoutMS=5000)
-        self.db = self._client[CFG.DB_NAME]; logger.info("✅ اتصال به MongoDB برقرار شد.")
-    def _get_collection(self, name: str): return self.db[name]
-    async def find(self, coll: str, q: Dict, m: Type, s: Optional[Tuple[str, int]] = None, l: int=100) -> List[Any]:
-        c = self._get_collection(coll).find(q);
-        if s: c = c.sort(s[0], s[1])
-        docs = await c.limit(l).to_list(length=l); return [m.model_validate(doc) for doc in docs]
+        self.db = self._client[CFG.DB_NAME]
+        logger.info("✅ اتصال به MongoDB برقرار شد.")
+
+    def _get_collection(self, name: str):
+        return self.db[name]
+
+    async def find(self, coll: str, q: Dict, m: Type, s: Optional[Tuple[str, int]] = None, l: int = 100) -> List[Any]:
+        c = self._get_collection(coll).find(q)
+        if s:
+            c = c.sort(s[0], s[1])
+        docs = await c.limit(l).to_list(length=l)
+        return [m.model_validate(doc) for doc in docs]
+
     async def find_one(self, coll: str, q: Dict, m: Type) -> Optional[Any]:
-        doc = await self._get_collection(coll).find_one(q); return m.model_validate(doc) if doc else None
-    async def insert_one(self, coll: str, doc: BaseModel): return await self._get_collection(coll).insert_one(doc.model_dump(by_alias=True))
+        doc = await self._get_collection(coll).find_one(q)
+        return m.model_validate(doc) if doc else None
+
+    async def insert_one(self, coll: str, doc: BaseModel):
+        return await self._get_collection(coll).insert_one(doc.model_dump(by_alias=True))
+
     async def find_one_and_update(self, coll: str, q: Dict, u: Dict, m: Type, upsert=False):
         doc = await self._get_collection(coll).find_one_and_update(q, {"$set": u}, upsert=upsert, return_document=True)
         return m.model_validate(doc) if doc else None
-    async def delete_many(self, coll: str, q: Dict): return await self._get_collection(coll).delete_many(q)
-    async def delete_one(self, coll: str, q: Dict): return await self._get_collection(coll).delete_one(q)
+
+    async def delete_many(self, coll: str, q: Dict):
+        return await self._get_collection(coll).delete_many(q)
+
+    async def delete_one(self, coll: str, q: Dict):
+        return await self._get_collection(coll).delete_one(q)
+
     async def delete_workspace_cascade(self, workspace_id: str, user_id: str):
         q = {"workspace_id": workspace_id, "user_id": user_id}
-        await self.delete_many("conversations", q); await self.delete_many("messages", q)
-        await self.delete_many("memories", q); await self.delete_many("documents", q)
+        await self.delete_many("conversations", q)
+        await self.delete_many("messages", q)
+        await self.delete_many("memories", q)
+        await self.delete_many("documents", q)
         await self._get_collection("workspaces").delete_one({"_id": workspace_id, "user_id": user_id})
+
 DB = DatabaseManager()
 
 # ----------------------------------------------------------------------
-# بخش ۶: مدیریت مدل‌های هوش مصنوعی
+# بخش ۶: مدل‌ها و مدیریت مدل‌های هوش مصنوعی (با اطلاعات کامل)
 # ----------------------------------------------------------------------
+MODEL_INFO: Dict[str, Dict[str, Any]] = {
+    "gemini-2.5-pro": {
+        "display": "Gemini 2.5 Pro",
+        "rpm": 5, "rpd": 100, "monthly_30d": 3000,
+        "inputs": ["audio", "images", "video", "text", "PDF"],
+        "outputs": ["text"],
+        "note": "مدل «thinking»، کانتکست بسیار بلند؛ تصویر/ویدیو/صدا را تحلیل می‌کند اما خروجی متن است."
+    },
+    "gemini-2.5-flash": {
+        "display": "Gemini 2.5 Flash",
+        "rpm": 10, "rpd": 250, "monthly_30d": 7500,
+        "inputs": ["text", "images", "video", "audio"],
+        "outputs": ["text"],
+        "note": "قیمت-کارایی مناسب برای حجم بالا؛ خروجی متن."
+    },
+    "gemini-2.5-flash-lite": {
+        "display": "Gemini 2.5 Flash-Lite",
+        "rpm": 15, "rpd": 1000, "monthly_30d": 30000,
+        "inputs": ["text", "image", "video", "audio", "PDF"],
+        "outputs": ["text"],
+        "note": "بهینه‌شده برای Throughput بالا/هزینه کم."
+    },
+    "gemini-live-2.5-flash-preview": {
+        "display": "Gemini 2.5 Flash Live (preview)",
+        "rpm": 3, "rpd": None, "monthly_30d": None,
+        "inputs": ["audio", "video", "text"], "outputs": ["text", "audio"],
+        "note": "حالت low-latency صوت + ویدیو؛ نرخ‌های کامل منتشر نشده."
+    },
+    "gemini-2.5-flash-preview-native-audio-dialog": {
+        "display": "Gemini 2.5 Flash Native Audio Dialog (preview)",
+        "rpm": 1, "rpd": 5, "monthly_30d": 150,
+        "inputs": ["audio", "video", "text"], "outputs": ["audio", "text"],
+        "note": "خروجی همزمان صوت و متن؛ نرخ محدود برای preview."
+    },
+    "gemini-2.5-flash-preview-tts": {
+        "display": "Gemini 2.5 Flash Preview TTS",
+        "rpm": 3, "rpd": 15, "monthly_30d": 450,
+        "inputs": ["text"], "outputs": ["audio"],
+        "note": "TTS اختصاصی — نرخ و قیمت جدا در صفحه Pricing."
+    },
+    "gemini-2.5-flash-image-preview": {
+        "display": "Gemini 2.5 Flash Image (preview)",
+        "rpm": None, "rpd": None, "monthly_30d": None,
+        "inputs": ["images", "text"], "outputs": ["images", "text"],
+        "note": "محدودیت‌های preview و قیمت در مستندات."
+    },
+    "gemini-2.0-flash": {
+        "display": "Gemini 2.0 Flash",
+        "rpm": 15, "rpd": 200, "monthly_30d": 6000,
+        "inputs": ["audio", "images", "video", "text"], "outputs": ["text"],
+        "note": "نسل قبلی Flash؛ مناسب realtime و استریم."
+    },
+    "gemini-2.0-flash-preview-image-generation": {
+        "display": "Gemini 2.0 Flash Preview Image Gen",
+        "rpm": 10, "rpd": 100, "monthly_30d": 3000,
+        "inputs": ["audio", "images", "video", "text"], "outputs": ["text", "images"],
+        "note": "محدودیت جدا برای تولید تصویر."
+    },
+    "gemini-embeddings": {
+        "display": "Gemini Embeddings",
+        "rpm": 100, "rpd": 1000, "monthly_30d": 30000,
+        "inputs": ["text"], "outputs": ["vector embeddings"],
+        "note": "مخصوص استخراج embeddings؛ نرخ و throughput بالاتر."
+    },
+    "gemma-3": {
+        "display": "Gemma 3 & 3n",
+        "rpm": 30, "rpd": 14400, "monthly_30d": 432000,
+        "inputs": ["text", "multimodal"], "outputs": ["text", "vectors"],
+        "note": "برای بارهای بزرگ و throughput بالا مناسب است."
+    },
+    "gemini-1.5-flash": {
+        "display": "Gemini 1.5 Flash (deprecated)",
+        "rpm": 15, "rpd": 50, "monthly_30d": 1500,
+        "inputs": ["audio", "images", "video", "text"], "outputs": ["text"],
+        "note": "در حال Deprecated؛ هنوز در برخی فهرست‌ها دیده می‌شود."
+    },
+}
+
 class ModelManager:
     def __init__(self):
-        self._models = {}
-        model_names = ["gemini-1.5-pro-latest", "gemini-1.5-flash-latest", "gemini-pro"]
-        self.safety_settings = [SafetySetting(category=hc, threshold="BLOCK_NONE") for hc in HarmCategory]
-        for name in model_names:
-            try: self._models[name] = genai.GenerativeModel(model_name=name, safety_settings=self.safety_settings)
-            except Exception as e: logger.warning(f"⚠️ مدل {name} بارگذاری نشد: {e}")
-    def get_model(self, model_name: str) -> Optional[genai.GenerativeModel]: return self._models.get(model_name)
-    def get_available_models(self) -> List[str]: return list(self._models.keys())
+        self._models: Dict[str, genai.GenerativeModel] = {}
+        self._available: List[str] = list(MODEL_INFO.keys())
+        try:
+            self.safety_settings = [SafetySetting(category=hc, threshold="BLOCK_NONE") for hc in HarmCategory]
+        except Exception:
+            self.safety_settings = None
+
+        for name in self._available:
+            try:
+                if self.safety_settings:
+                    self._models[name] = genai.GenerativeModel(model_name=name, safety_settings=self.safety_settings)
+                else:
+                    self._models[name] = genai.GenerativeModel(model_name=name)
+                logger.info(f"✅ مدل بارگذاری شد: {name}")
+            except Exception as e:
+                logger.warning(f"⚠️ بارگذاری مدل '{name}' ناموفق بود: {e}")
+
+    def get_model(self, model_name: str) -> Optional[genai.GenerativeModel]:
+        return self._models.get(model_name)
+
+    def get_available_models(self) -> List[str]:
+        loaded = [name for name in self._available if name in self._models]
+        return loaded or self._available
+
+    def get_model_info(self, model_name: str) -> Dict[str, Any]:
+        return MODEL_INFO.get(model_name, {"display": model_name, "note": ""})
+
 MODELS = ModelManager()
 
 # ----------------------------------------------------------------------
@@ -186,17 +351,22 @@ class ChatProcessor:
         if not text_elements: return
 
         msg = cl.Message(content="در حال پردازش فایل‌های آپلود شده...", author="System"); await msg.send()
-        all_chunks = []
         for el in text_elements:
             content = ""
             if el.path:
                 with open(el.path, "rb") as f:
-                    if "pdf" in el.mime: reader = PdfReader(f); content = "\n".join([page.extract_text() for page in reader.pages])
-                    elif "word" in el.mime: doc = docx.Document(f); content = "\n".join([p.text for p in doc.paragraphs])
-                    else: content = f.read().decode("utf-8")
-            
+                    if "pdf" in el.mime:
+                        reader = PdfReader(f)
+                        content = "\n".join([page.extract_text() or "" for page in reader.pages])
+                    elif "word" in el.mime:
+                        doc = docx.Document(f)
+                        content = "\n".join([p.text for p in doc.paragraphs])
+                    else:
+                        try:
+                            content = f.read().decode("utf-8")
+                        except Exception:
+                            content = ""
             if not content: continue
-            
             # Text chunking
             for i in range(0, len(content), CFG.CHUNK_SIZE - CFG.CHUNK_OVERLAP):
                 chunk_text = content[i:i + CFG.CHUNK_SIZE]
@@ -217,7 +387,8 @@ class ChatProcessor:
     async def _prepare_model_history(self, conv_id: str) -> List[Dict[str, Any]]:
         messages = await self.db.find("messages", {"conv_id": conv_id}, Message, sort=("created_at", -1), limit=10)
         history = []
-        for m in reversed(messages): history.append({"role": m.role, "parts": [{"text": m.content}]})
+        for m in reversed(messages):
+            history.append({"role": m.role, "parts": [{"text": m.content}]})
         return history
 
     async def process_message(self, message: cl.Message):
@@ -232,8 +403,9 @@ class ChatProcessor:
 
             history = await self._prepare_model_history(conv_id)
             model = self.models.get_model(settings.default_model)
-            if not model: await cl.Message(f"مدل '{settings.default_model}' یافت نشد.").send(); return
-            
+            if not model:
+                await cl.Message(f"مدل '{settings.default_model}' یافت نشد.").send(); return
+
             response_stream = await model.generate_content_async(
                 history, stream=True,
                 tools=[Tool(function_declarations=self.tools.get_all_declarations())],
@@ -242,7 +414,9 @@ class ChatProcessor:
 
             await self._handle_stream_and_tools(response_stream, history, model, workspace_id, conv_id, user_id)
 
-        except Exception as e: logger.exception("❌ خطای جدی در پردازش پیام."); await cl.ErrorMessage(f"یک خطای داخلی رخ داد: {e}").send()
+        except Exception as e:
+            logger.exception("❌ خطای جدی در پردازش پیام.")
+            await cl.ErrorMessage(f"یک خطای داخلی رخ داد: {e}").send()
 
     async def _handle_stream_and_tools(self, stream, history, model, workspace_id, conv_id, user_id):
         tool_calls = []; text_response = ""
@@ -250,33 +424,36 @@ class ChatProcessor:
 
         async for chunk in stream:
             try:
-                if (parts := chunk.parts):
+                if (parts := getattr(chunk, 'parts', None)):
                     for part in parts:
-                        if part.text:
+                        if getattr(part, 'text', None):
                             if not ui_message.id: await ui_message.send()
                             text_response += part.text; await ui_message.stream_token(part.text)
-                        if (function_call := part.function_call): tool_calls.append(function_call)
-            except Exception as e: logger.error(f"خطا در پردازش چانک: {e}")
+                        if (function_call := getattr(part, 'function_call', None)):
+                            tool_calls.append(function_call)
+            except Exception as e:
+                logger.error(f"خطا در پردازش چانک: {e}")
 
         if ui_message.id: await ui_message.update()
-        
+
         if tool_calls:
             model_response_with_tools = f"[فراخوانی ابزار: {', '.join([tc.name for tc in tool_calls])}]"
             await self.db.insert_one("messages", Message(workspace_id=workspace_id, conv_id=conv_id, role="model", content=model_response_with_tools, user_id=user_id))
-            
+
             tasks = [self.tools.execute_tool(tc.name, **dict(tc.args)) for tc in tool_calls]
             tool_results = await asyncio.gather(*tasks)
 
             tool_response_parts = [{"tool_response": {"name": tc.name, "response": res}} for tc, res in zip(tool_calls, tool_results)]
-            
+
             history.append({"role": "model", "parts": [{"function_call": tc} for tc in tool_calls]})
             history.append({"role": "tool", "parts": tool_response_parts})
-            
+
             final_stream = await model.generate_content_async(history, stream=True)
             await self._handle_stream_and_tools(final_stream, history, model, workspace_id, conv_id, user_id)
-        
+
         elif text_response:
             await self.db.insert_one("messages", Message(workspace_id=workspace_id, conv_id=conv_id, role="assistant", content=text_response, user_id=user_id))
+
 PROCESSOR = ChatProcessor(DB, TOOLS, MODELS)
 
 # ----------------------------------------------------------------------
@@ -315,20 +492,27 @@ async def on_chat_start():
 
     user_id = user.identifier
     ws = await DB.find_one("workspaces", {"user_id": user_id}, Workspace)
-    if not ws: ws = Workspace(user_id=user_id, name="عمومی"); await DB.insert_one("workspaces", ws)
+    if not ws:
+        ws = Workspace(user_id=user_id, name="عمومی")
+        await DB.insert_one("workspaces", ws)
 
     settings = await DB.find_one("settings", {"user_id": user_id}, UserSettings)
-    if not settings: settings = UserSettings(user_id=user_id); await DB.insert_one("settings", settings)
+    if not settings:
+        settings = UserSettings(user_id=user_id)
+        await DB.insert_one("settings", settings)
 
-    cl.user_session.set("workspace_id", ws.id); cl.user_session.set("settings", settings)
+    cl.user_session.set("workspace_id", ws.id)
+    cl.user_session.set("settings", settings)
     cl.user_session.set("current_conv_id", None)
-    
+
     await render_sidebar(user_id, ws.id)
     await cl.Message(content=f"### سلام {user.username}!\nبه {CFG.VERSION} خوش آمدید.").send()
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    if not cl.user_session.get("user"): await cl.Message("لطفا ابتدا با حساب GitHub خود وارد شوید.").send(); return
+    if not cl.user_session.get("user"):
+        await cl.Message("لطفا ابتدا با حساب GitHub خود وارد شوید.").send()
+        return
     await PROCESSOR.process_message(message)
 
 @cl.on_action
@@ -350,8 +534,16 @@ async def on_action(action: cl.Action):
 
     elif action.name == ACTION.OPEN_SETTINGS:
         settings: UserSettings = cl.user_session.get("settings")
+        # build model select items with info
+        model_items = []
+        for m in MODELS.get_available_models():
+            info = MODELS.get_model_info(m)
+            short = info.get("note", "")[:80]
+            label = f"{info.get('display', m)} — {short}"
+            model_items.append(cl.SelectItem(id=m, label=label))
+
         res = await cl.AskActionMessage("تنظیمات را ویرایش کنید:", actions=[cl.Action(name=ACTION.SAVE_SETTINGS, label="ذخیره")], inputs=[
-                cl.Select("model", label="مدل پیش‌فرض", items=[cl.SelectItem(id=m, label=m) for m in MODELS.get_available_models()], initial_value=settings.default_model),
+                cl.Select("model", label="مدل پیش‌فرض", items=model_items, initial_value=settings.default_model),
                 cl.Slider("temp", label="Temperature", min=0, max=1, step=0.1, initial=settings.temperature)
             ]).send()
         if res and res.get("name") == ACTION.SAVE_SETTINGS:
@@ -372,7 +564,8 @@ async def on_action(action: cl.Action):
             if not await DB.find_one("workspaces", {"user_id": user_id, "name": name}, Workspace):
                 ws = Workspace(user_id=user_id, name=name); await DB.insert_one("workspaces", ws)
                 await render_sidebar(user_id, ws_id)
-            else: await cl.Message(f"فضای کاری '{name}' از قبل وجود دارد.").send()
+            else:
+                await cl.Message(f"فضای کاری '{name}' از قبل وجود دارد.").send()
 
     elif action.name == ACTION.DELETE_WORKSPACE:
         await cl.AskActionMessage(f"آیا از حذف این فضای کاری مطمئن هستید؟ این عمل غیرقابل بازگشت است.", actions=[
